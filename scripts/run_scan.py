@@ -15,7 +15,9 @@ load_dotenv(PROJECT_ROOT / ".env")
 from crucible.cleaner import clean  # noqa: E402
 from crucible.config import load_config  # noqa: E402
 from crucible.fetcher import fetch_universe  # noqa: E402
+from crucible.filters import apply_filters  # noqa: E402
 from crucible.logging_setup import configure_logging  # noqa: E402
+from crucible.scorer import score  # noqa: E402
 
 
 def main() -> int:
@@ -46,15 +48,23 @@ def main() -> int:
         config.universe, raw_dir, tickers=args.tickers or None
     )
     processed = clean(raw_dir, run_ts, processed_dir)
+    filtered = apply_filters(processed, config.filters)
+    shortlist = score(filtered, config)
 
-    n_total = len(processed)
-    n_usable = int((~processed["insufficient_data"]).sum())
     logger.info(
-        "Scan complete — %d tickers processed, %d usable (≥%d years data)",
-        n_total,
-        n_usable,
-        3,
+        "Pipeline complete — %d processed → %d filtered → %d scored",
+        len(processed),
+        len(filtered),
+        len(shortlist),
     )
+
+    if not shortlist.empty:
+        cols = ["sector", "roic_proxy_avg", "gross_margin_avg",
+                "net_debt_ebitda", "quality_score", "valuation_score",
+                "fx_penalty", "composite_score"]
+        logger.info("Shortlist (top %d):\n%s", len(shortlist),
+                    shortlist[cols].to_string())
+
     return 0
 
 
