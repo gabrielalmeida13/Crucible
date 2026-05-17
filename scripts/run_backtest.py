@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mini backtest: 15 large-cap S&P 500 tickers, Jan 2024 → Mar 2025.
+"""Full S&P 500 backtest — train 2010–2022, walk-forward out-of-sample.
 
 Data sources
 ------------
@@ -32,39 +32,23 @@ sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / ".env")
 
 from crucible.backtest import BacktestConfig, generate_report, run_backtest, run_sensitivity
-from crucible.config import CrucibleConfig, FilterThresholds
-from crucible.fetcher import _load_cik_mapping, _to_float, fetch_financials
+from crucible.config import CrucibleConfig
+from crucible.fetcher import _load_cik_mapping, _to_float, fetch_financials, fetch_sp500_tickers
 
 # ---------------------------------------------------------------------------
 # Parameters
 # ---------------------------------------------------------------------------
 
-TICKERS: list[str] = [
-    "MSFT", "AAPL", "GOOGL", "META", "V",
-    "JNJ",  "PG",   "JPM",   "UNH",  "HD",
-    "LLY",  "AVGO", "COST",  "PEP",  "KO",
-]
+BACKTEST_START    = pd.Timestamp("2010-01-31", tz="UTC")
+BACKTEST_END      = pd.Timestamp("2022-12-31", tz="UTC")
+PRICE_FETCH_START = "2009-01-01"
+PRICE_FETCH_END   = "2024-01-31"  # covers 12-month hit-rate lookforward from Dec 2022
 
-BACKTEST_START    = pd.Timestamp("2023-01-31", tz="UTC")
-BACKTEST_END      = pd.Timestamp("2025-03-31", tz="UTC")
-PRICE_FETCH_START = "2022-06-01"
-PRICE_FETCH_END   = "2026-03-31"
-
-TRAIN_MONTHS  = 12
-TOP_N         = 10
+TRAIN_MONTHS  = 24
+TOP_N         = 20
 REPORT_PATH   = ROOT / "data" / "backtest_report.md"
 EDGAR_DIR     = ROOT / "data" / "raw" / "edgar" / "companyfacts"
 CIK_MAP_PATH  = ROOT / "data" / "raw" / "edgar" / "cik_mapping.json"
-
-# Relaxed thresholds: early backtest dates have fewer than 5 years of EDGAR filings.
-_MINI_FILTERS = FilterThresholds(
-    roic_min=0.15,
-    fcf_positive_min_years=3,
-    fcf_lookback_years=5,
-    net_debt_ebitda_max=3.0,
-    revenue_growth_positive_min_years=2,
-    revenue_growth_lookback_years=5,
-)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -231,9 +215,13 @@ def main() -> None:
 
     cik_map = _load_cik_mapping(CIK_MAP_PATH)
 
+    log.info("Fetching S&P 500 ticker list from Wikipedia …")
+    tickers = fetch_sp500_tickers()
+    log.info("Universe: %d tickers", len(tickers))
+
     log.info(
-        "Mini Backtest | %d tickers | train %s – %s | test from %s",
-        len(TICKERS),
+        "S&P 500 Backtest | %d tickers | train %s – %s | test from %s",
+        len(tickers),
         BACKTEST_START.date(),
         (BACKTEST_START + pd.DateOffset(months=TRAIN_MONTHS - 1)).date(),
         (BACKTEST_START + pd.DateOffset(months=TRAIN_MONTHS)).date(),
@@ -241,7 +229,7 @@ def main() -> None:
 
     # ── Step 1: Fetch prices ─────────────────────────────────────────────────
     raw_price_series: list[pd.Series] = []
-    for ticker in TICKERS:
+    for ticker in tickers:
         log.info("Fetching prices for %s …", ticker)
         s = _fetch_prices(ticker, ticker, PRICE_FETCH_START, PRICE_FETCH_END)
         if not s.empty:
@@ -264,7 +252,7 @@ def main() -> None:
     # ── Step 2: Build monthly snapshots from EDGAR ───────────────────────────
     monthly_dates = pd.date_range(BACKTEST_START, BACKTEST_END, freq="ME", tz="UTC")
     log.info("Building %d monthly snapshots from EDGAR …", len(monthly_dates))
-    fund_by_date = _build_fundamentals_by_date(TICKERS, monthly_dates, EDGAR_DIR, cik_map)
+    fund_by_date = _build_fundamentals_by_date(tickers, monthly_dates, EDGAR_DIR, cik_map)
 
     first_test_idx = TRAIN_MONTHS
     if first_test_idx < len(monthly_dates):
@@ -272,11 +260,11 @@ def main() -> None:
         n_ok = int((~snap["insufficient_data"]).sum())
         log.info(
             "First test month (%s): %d/%d tickers with sufficient data",
-            monthly_dates[first_test_idx].date(), n_ok, len(TICKERS),
+            monthly_dates[first_test_idx].date(), n_ok, len(tickers),
         )
 
     # ── Step 3: Walk-forward backtest ────────────────────────────────────────
-    config = CrucibleConfig(account_currency="USD", filters=_MINI_FILTERS)
+    config = CrucibleConfig(account_currency="USD")
     bt_cfg = BacktestConfig(
         train_months=TRAIN_MONTHS, top_n=TOP_N,
         holding_months=1, hit_rate_months=12,

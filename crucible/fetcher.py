@@ -508,7 +508,7 @@ def fetch_universe(
     if tickers is None:
         tickers = fetch_sp500_tickers()
 
-    cik_map = _load_cik_mapping()
+    cik_map = _load_cik_mapping(raw_dir / "edgar" / "cik_mapping.json")
 
     logger.info(
         "EDGAR fetch starting — %d tickers, as_of=%s",
