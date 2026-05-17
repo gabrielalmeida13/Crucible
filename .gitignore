@@ -1,0 +1,27 @@
+# Environment
+.env
+.python-version
+
+# Data — never committed
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+data/crucible.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.venv/
+
+# uv
+uv.lock
+
+# IDE
+.vscode/
+.idea/
