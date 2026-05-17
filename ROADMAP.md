@@ -1,6 +1,6 @@
 # Crucible — ROADMAP.md
 
-> Current status: **Phase 1 — Data pipeline + Fundamental filters**
+> Current status: **Phase 1 complete — moving to Phase 2 (backtesting)**
 > Update the status line above every time the phase changes.
 
 ---

@@ -18,6 +18,7 @@ from crucible.fetcher import fetch_universe  # noqa: E402
 from crucible.filters import apply_filters  # noqa: E402
 from crucible.logging_setup import configure_logging  # noqa: E402
 from crucible.scorer import score  # noqa: E402
+from crucible.store import create_tables, get_engine, save_scan  # noqa: E402
 
 
 def main() -> int:
@@ -37,6 +38,7 @@ def main() -> int:
 
     raw_dir = PROJECT_ROOT / "data" / "raw"
     processed_dir = PROJECT_ROOT / "data" / "processed"
+    db_path = PROJECT_ROOT / "data" / "crucible.db"
 
     logger.info(
         "Crucible scan starting — universe=%s  tickers=%s",
@@ -44,12 +46,18 @@ def main() -> int:
         args.tickers or "full universe",
     )
 
+    engine = get_engine(db_path)
+    create_tables(engine)
+
     run_ts, *_ = fetch_universe(
         config.universe, raw_dir, tickers=args.tickers or None
     )
     processed = clean(raw_dir, run_ts, processed_dir)
     filtered = apply_filters(processed, config.filters)
     shortlist = score(filtered, config)
+
+    scan_id = save_scan(engine, processed, shortlist, config.universe, run_ts)
+    logger.info("Scan persisted as scan_id=%d", scan_id)
 
     logger.info(
         "Pipeline complete — %d processed → %d filtered → %d scored",
