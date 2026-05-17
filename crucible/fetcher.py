@@ -27,7 +27,7 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-_FMP_BASE = "https://financialmodelingprep.com/api/v3"
+_FMP_BASE = "https://financialmodelingprep.com/stable"
 _DAILY_LIMIT = 250
 
 # Cache TTLs in seconds
@@ -217,22 +217,22 @@ def _fetch_ticker_raw(
     return {
         "profile": _cached_get(
             session, cache, f"profile:{ticker}", _TTL_PROFILE,
-            f"/profile/{ticker}", api_key,
+            "/profile", api_key, {"symbol": ticker},
         ) or [],
         "income": _cached_get(
             session, cache, f"income:{ticker}", _TTL_STATEMENTS,
-            f"/income-statement/{ticker}", api_key,
-            {"period": "annual", "limit": 5},
+            "/income-statement", api_key,
+            {"symbol": ticker, "period": "annual", "limit": 5},
         ) or [],
         "balance": _cached_get(
             session, cache, f"balance:{ticker}", _TTL_STATEMENTS,
-            f"/balance-sheet-statement/{ticker}", api_key,
-            {"period": "annual", "limit": 5},
+            "/balance-sheet-statement", api_key,
+            {"symbol": ticker, "period": "annual", "limit": 5},
         ) or [],
         "cashflow": _cached_get(
             session, cache, f"cashflow:{ticker}", _TTL_STATEMENTS,
-            f"/cash-flow-statement/{ticker}", api_key,
-            {"period": "annual", "limit": 5},
+            "/cash-flow-statement", api_key,
+            {"symbol": ticker, "period": "annual", "limit": 5},
         ) or [],
     }
 
@@ -254,10 +254,11 @@ def _raw_to_info_row(ticker: str, raw: dict[str, list]) -> dict:
         "sector": p.get("sector") or None,
         "sub_industry": p.get("industry") or None,
         "currency": p.get("currency") or None,
-        "p_e": _to_float(p.get("pe")),
     }
 
-    mkt_cap = _to_float(p.get("mktCap"))
+    mkt_cap = _to_float(p.get("marketCap"))
+    earnings = _to_float(latest_inc.get("netIncome"))
+    row["p_e"] = (mkt_cap / earnings) if (mkt_cap and earnings and earnings > 0) else None
     fcf = _to_float(latest_cf.get("freeCashFlow"))
     row["p_fcf"] = (mkt_cap / fcf) if (mkt_cap and fcf and fcf > 0) else None
 
@@ -327,7 +328,7 @@ def fetch_sp500_tickers(
     session = _session or requests.Session()
 
     data = _cached_get(session, cache, "sp500_constituents", _TTL_SP500,
-                       "/sp500_constituent", api_key)
+                       "/sp500-constituent", api_key)
     if not data:
         raise RuntimeError(
             "Could not fetch S&P 500 list — rate limit hit or API error. "
