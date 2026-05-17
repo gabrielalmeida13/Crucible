@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import pandera as pa
+import pandera.pandas as pa
 from pandera.typing import Index, Series
 
 PROCESSED_COLUMNS: list[str] = [

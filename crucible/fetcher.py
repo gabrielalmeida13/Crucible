@@ -21,7 +21,7 @@ _SP500_WIKI_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 
 def fetch_sp500_tickers() -> list[str]:
     """Pull the S&P 500 constituent list from Wikipedia."""
-    tables = pd.read_html(_SP500_WIKI_URL)
+    tables = pd.read_html(_SP500_WIKI_URL, storage_options={"User-Agent": "Mozilla/5.0"})
     tickers: list[str] = (
         tables[0]["Symbol"].str.replace(".", "-", regex=False).tolist()
     )
