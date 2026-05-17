@@ -12,6 +12,8 @@ dependencies = [
     "streamlit>=1.35",
     "pandera>=0.20",
     "python-dotenv>=1.0",
+    "lxml>=6.1.0",
+    "requests>=2.34.2",
 ]
 
 [dependency-groups]
