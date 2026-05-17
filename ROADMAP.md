@@ -1,6 +1,6 @@
 # Crucible — ROADMAP.md
 
-> Current status: **Phase 0 — Setup**
+> Current status: **Phase 1 — Data pipeline + Fundamental filters**
 > Update the status line above every time the phase changes.
 
 ---
