@@ -610,3 +610,189 @@ def test_fetch_universe_russell3000_raises_file_not_found_not_not_implemented() 
             tickers=["AAPL"],
             as_of_date=pd.Timestamp("2023-01-01", tz="UTC"),
         )
+
+
+# ---------------------------------------------------------------------------
+# _load_cik_annual_facts — LRU cache split
+# ---------------------------------------------------------------------------
+
+
+def test_load_cik_annual_facts_returns_empty_for_missing_file(tmp_path: Path) -> None:
+    from crucible.fetcher import _load_cik_annual_facts, _load_cik_annual_facts as f
+    result = _load_cik_annual_facts("0000000001", str(tmp_path))
+    assert result == {}
+
+
+def test_load_cik_annual_facts_extracts_correct_metrics(tmp_path: Path) -> None:
+    from crucible.fetcher import _load_cik_annual_facts
+    _write_cik_json(tmp_path, 1, {
+        "Revenues": [_rec("2022-12-31", 1_000_000, "2023-01-20", 2022, "10-K", "FY")],
+        "NetIncomeLoss": [_rec("2022-12-31", 100_000, "2023-01-20", 2022, "10-K", "FY")],
+    })
+    # Use a unique edgar_dir_str so lru_cache doesn't return a previous test's result
+    result = _load_cik_annual_facts("0000000001", str(tmp_path / "unique_a"))
+    # tmp_path/unique_a doesn't contain the file — but let's write to a subdir
+    facts_dir = tmp_path / "cfacts_a"
+    facts_dir.mkdir()
+    (_make_cik_json(1, {
+        "Revenues": [_rec("2022-12-31", 1_000_000, "2023-01-20", 2022, "10-K", "FY")],
+    }))
+    (facts_dir / "CIK0000000001.json").write_text(
+        json.dumps(_make_cik_json(1, {
+            "Revenues": [_rec("2022-12-31", 1_000_000, "2023-01-20", 2022, "10-K", "FY")],
+        }))
+    )
+    result2 = _load_cik_annual_facts("0000000001", str(facts_dir))
+    assert "Total Revenue" in result2
+    assert len(result2["Total Revenue"]) == 1
+
+
+def test_load_cik_annual_facts_excludes_quarterly_forms(tmp_path: Path) -> None:
+    from crucible.fetcher import _load_cik_annual_facts
+    facts_dir = tmp_path / "cfacts_b"
+    facts_dir.mkdir()
+    (facts_dir / "CIK0000000002.json").write_text(
+        json.dumps(_make_cik_json(2, {
+            "Revenues": [
+                _rec("2022-12-31", 1_000_000, "2023-01-20", 2022, "10-K", "FY"),
+                _rec("2022-09-30", 250_000, "2022-10-15", 2022, "10-Q", "Q3"),
+            ],
+        }))
+    )
+    result = _load_cik_annual_facts("0000000002", str(facts_dir))
+    assert "Total Revenue" in result
+    # Only the 10-K annual record should be present
+    assert all(r["filed"] == "2023-01-20" for r in result["Total Revenue"])
+
+
+def test_parse_edgar_json_still_applies_date_filter_on_cached_facts(tmp_path: Path) -> None:
+    """_parse_edgar_json must apply as_of_date filter even when _load_cik_annual_facts
+    is cached — verifies the two-stage separation is correct."""
+    facts_dir = tmp_path / "cfacts_c"
+    facts_dir.mkdir()
+    (facts_dir / "CIK0000000003.json").write_text(
+        json.dumps(_make_cik_json(3, {
+            "Revenues": [
+                _rec("2020-12-31", 800_000, "2021-02-01", 2020, "10-K", "FY"),
+                _rec("2021-12-31", 900_000, "2022-02-01", 2021, "10-K", "FY"),
+            ],
+        }))
+    )
+    early = _parse_edgar_json("3", pd.Timestamp("2021-06-01", tz="UTC"), facts_dir)
+    late  = _parse_edgar_json("3", pd.Timestamp("2022-06-01", tz="UTC"), facts_dir)
+    # Early cutoff: only 2020 filing (filed 2021-02-01) is visible
+    assert len(early.get("Total Revenue", [])) == 1
+    assert early["Total Revenue"][0]["fy"] == 2020
+    # Late cutoff: both filings visible
+    assert len(late.get("Total Revenue", [])) == 2
+
+
+# ---------------------------------------------------------------------------
+# fetch_russell1000_tickers — CSV parsing
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_russell1000_tickers_parses_standard_format(monkeypatch: pytest.MonkeyPatch) -> None:
+    from crucible.fetcher import fetch_russell1000_tickers
+    import crucible.fetcher as fetcher_mod
+
+    csv_body = (
+        "iShares Russell 1000 ETF\n"
+        "Holdings as of 2024-01-05\n"
+        "Ticker,Name,Asset Class,Market Value,Weight (%)\n"
+        "MSFT,MICROSOFT CORP,Equity,1000000,3.5\n"
+        "AAPL,APPLE INC,Equity,900000,3.1\n"
+        "CASH_COMPONENT,,Cash and/or Derivatives,100000,0.1\n"
+    )
+
+    class _FakeResp:
+        text = csv_body
+        def raise_for_status(self) -> None: pass
+
+    monkeypatch.setattr(fetcher_mod.requests, "get", lambda *a, **kw: _FakeResp())
+    result = fetch_russell1000_tickers("http://fake-url")
+    assert "MSFT" in result
+    assert "AAPL" in result
+    # Cash/derivatives row has no "Equity" Asset Class — must be excluded
+    assert "CASH_COMPONENT" not in result
+
+
+def test_fetch_russell1000_tickers_normalises_dots_to_dashes(monkeypatch: pytest.MonkeyPatch) -> None:
+    from crucible.fetcher import fetch_russell1000_tickers
+    import crucible.fetcher as fetcher_mod
+
+    csv_body = (
+        "iShares Russell 1000 ETF\n"
+        "Holdings as of 2024-01-05\n"
+        "Ticker,Name,Asset Class\n"
+        "BRK.B,BERKSHIRE HATHAWAY B,Equity\n"
+    )
+
+    class _FakeResp:
+        text = csv_body
+        def raise_for_status(self) -> None: pass
+
+    monkeypatch.setattr(fetcher_mod.requests, "get", lambda *a, **kw: _FakeResp())
+    result = fetch_russell1000_tickers("http://fake-url")
+    assert "BRK-B" in result
+    assert "BRK.B" not in result
+
+
+def test_fetch_russell1000_tickers_raises_if_no_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    from crucible.fetcher import fetch_russell1000_tickers
+    import crucible.fetcher as fetcher_mod
+
+    class _FakeResp:
+        text = "No useful content here\nJust garbage\n"
+        def raise_for_status(self) -> None: pass
+
+    monkeypatch.setattr(fetcher_mod.requests, "get", lambda *a, **kw: _FakeResp())
+    with pytest.raises(ValueError, match="Ticker"):
+        fetch_russell1000_tickers("http://fake-url")
+
+
+# ---------------------------------------------------------------------------
+# generate_picks_csv
+# ---------------------------------------------------------------------------
+
+
+def test_generate_picks_csv_creates_file(tmp_path: Path) -> None:
+    from crucible.backtest import (
+        BacktestConfig, BacktestResult, MonthlyResult, generate_picks_csv
+    )
+    dates = pd.date_range("2020-01-31", periods=4, freq="ME", tz="UTC")
+    prices = pd.DataFrame(
+        {"AAPL": [100.0, 110.0, 105.0, 115.0], "SP500": [300.0, 310.0, 305.0, 320.0]},
+        index=dates,
+    )
+    monthly = [
+        MonthlyResult(
+            date=dates[0], portfolio_return=0.10, benchmark_return=0.03,
+            n_picks=1, tickers=["AAPL"], ticker_returns={"AAPL": 0.10},
+        )
+    ]
+    result = BacktestResult(
+        monthly_results=monthly, hit_rate_returns=[0.10],
+        bt_config=BacktestConfig(holding_months=1),
+    )
+    out = tmp_path / "picks.csv"
+    generate_picks_csv(result, prices, out)
+    assert out.exists()
+    df = pd.read_csv(out)
+    assert list(df.columns) == ["date", "ticker", "entry_price", "exit_price", "return_pct"]
+    assert len(df) == 1
+    assert df.iloc[0]["ticker"] == "AAPL"
+    assert abs(df.iloc[0]["entry_price"] - 100.0) < 0.01
+    assert abs(df.iloc[0]["exit_price"] - 110.0) < 0.01
+    assert abs(df.iloc[0]["return_pct"] - 10.0) < 0.01
+
+
+def test_generate_picks_csv_empty_result(tmp_path: Path) -> None:
+    from crucible.backtest import BacktestConfig, BacktestResult, generate_picks_csv
+    prices = pd.DataFrame({"SP500": [300.0]},
+                          index=pd.date_range("2020-01-31", periods=1, freq="ME", tz="UTC"))
+    result = BacktestResult(monthly_results=[], hit_rate_returns=[], bt_config=BacktestConfig())
+    out = tmp_path / "picks.csv"
+    generate_picks_csv(result, prices, out)
+    assert out.exists()
+    assert pd.read_csv(out).empty

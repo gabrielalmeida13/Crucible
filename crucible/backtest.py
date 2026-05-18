@@ -373,6 +373,44 @@ def ticker_contribution_analysis(result: BacktestResult) -> pd.DataFrame:
     return df.sort_values("total_contribution", ascending=False).reset_index(drop=True)
 
 
+def generate_picks_csv(
+    result: BacktestResult,
+    prices: pd.DataFrame,
+    output_path: Path,
+) -> None:
+    """Write per-pick flat CSV: date, ticker, entry_price, exit_price, return_pct."""
+    rows: list[dict] = []
+    price_idx = prices.index
+
+    for m in result.monthly_results:
+        exit_date = _advance(m.date, price_idx, result.bt_config.holding_months)
+        for ticker in m.tickers:
+            entry_price: float | None = None
+            exit_price: float | None = None
+            if ticker in prices.columns:
+                if m.date in price_idx:
+                    v = prices.at[m.date, ticker]
+                    entry_price = float(v) if pd.notna(v) else None
+                if exit_date is not None and exit_date in price_idx:
+                    v = prices.at[exit_date, ticker]
+                    exit_price = float(v) if pd.notna(v) else None
+            ret = m.ticker_returns.get(ticker)
+            rows.append({
+                "date": m.date.date(),
+                "ticker": ticker,
+                "entry_price": round(entry_price, 4) if entry_price is not None else None,
+                "exit_price": round(exit_price, 4) if exit_price is not None else None,
+                "return_pct": round(ret * 100, 4) if ret is not None else None,
+            })
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        rows,
+        columns=["date", "ticker", "entry_price", "exit_price", "return_pct"],
+    ).to_csv(output_path, index=False)
+    logger.info("Picks CSV saved: %s (%d rows)", output_path, len(rows))
+
+
 def generate_ticker_contribution(
     result: BacktestResult,
     output_path: Path,

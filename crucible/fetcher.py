@@ -15,14 +15,17 @@ It must never be used for fundamental metrics.
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import math
 from datetime import timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import requests
 import yfinance as yf
 
 logger = logging.getLogger(__name__)
@@ -132,75 +135,99 @@ def _load_cik_mapping(
 # ---------------------------------------------------------------------------
 
 
-def _parse_edgar_json(
-    cik: str,
-    as_of_date: pd.Timestamp,
-    edgar_dir: Path = Path("data/raw/edgar/companyfacts"),
+@lru_cache(maxsize=300)
+def _load_cik_annual_facts(
+    padded_cik: str,
+    edgar_dir_str: str,
 ) -> dict[str, list[dict[str, Any]]]:
-    """Read a local EDGAR CIK JSON and return annual facts available as of as_of_date.
+    """Load all 10-K/10-K/A annual facts for a CIK from disk. LRU-evicts at 300 entries.
 
-    Returns: {metric_name: [{"end": str, "val": float, "filed": str, "fy": int}, ...]},
-    sorted newest fiscal year first. Only 10-K / 10-K/A annual (fp="FY") records
-    with filed <= as_of_date are included. When multiple filings cover the same fiscal
-    year (e.g. amendments), only the one with the latest filed date is kept.
+    Returns {metric_name: [{end, val, filed, fy}, ...]} with NO date filter applied —
+    _parse_edgar_json applies the as_of_date filter in memory on the cached result.
+
+    The 300-entry cap keeps ≲50 MB of parsed dicts in memory (≈150 KB per company
+    for 15 metrics × 15 years × ~200 bytes/record), well within the 2 GiB budget.
+
+    Do NOT mutate the returned dicts — the cache returns the same object on every hit.
     """
-    padded_cik = str(cik).zfill(10)
-    json_path = edgar_dir / f"CIK{padded_cik}.json"
+    json_path = Path(edgar_dir_str) / f"CIK{padded_cik}.json"
     if not json_path.exists():
         logger.debug("No EDGAR JSON for CIK %s at %s", padded_cik, json_path)
         return {}
 
     raw: dict[str, Any] = json.loads(json_path.read_bytes())
     us_gaap: dict[str, Any] = raw.get("facts", {}).get("us-gaap", {})
-    as_of_str = as_of_date.strftime("%Y-%m-%d")
 
     result: dict[str, list[dict[str, Any]]] = {}
 
     for metric_name, candidates in _XBRL_TAXONOMY.items():
-        best_records: list[dict[str, Any]] = []
-
         for tag in candidates:
             concept = us_gaap.get(tag)
             if not concept:
                 continue
 
-            # Pick USD unit values only (skip shares, pure, USD/shares, etc.)
             units: dict[str, list[dict]] = concept.get("units", {})
             usd_records: list[dict] = []
-            for unit_key, records in units.items():
+            for unit_key, recs in units.items():
                 if unit_key.upper() == "USD":
-                    usd_records = records
+                    usd_records = recs
                     break
             if not usd_records:
                 continue
 
-            # Filter: annual 10-K/10-K/A, fiscal year (fp=FY), filed <= as_of_date
-            filtered: list[dict[str, Any]] = []
+            collected: list[dict[str, Any]] = []
             for rec in usd_records:
                 if rec.get("form") not in {"10-K", "10-K/A"}:
                     continue
                 if rec.get("fp") != "FY":
                     continue
                 filed = rec.get("filed", "")
-                if not filed or filed > as_of_str:
+                end = rec.get("end", "")
+                val = rec.get("val")
+                if not filed or val is None:
                     continue
-                filtered.append({
-                    "end": rec["end"],
-                    "val": rec["val"],
-                    "filed": filed,
-                    "fy": rec.get("fy"),
-                })
+                try:
+                    fy_key = rec.get("fy") or int(end[:4])
+                except (ValueError, TypeError):
+                    continue
+                collected.append({"end": end, "val": val, "filed": filed, "fy": fy_key})
 
-            if filtered:
-                best_records = filtered
+            if collected:
+                result[metric_name] = collected
                 break  # first candidate with data wins for this metric
 
-        if not best_records:
+    return result
+
+
+def _parse_edgar_json(
+    cik: str,
+    as_of_date: pd.Timestamp,
+    edgar_dir: Path = Path("data/raw/edgar/companyfacts"),
+) -> dict[str, list[dict[str, Any]]]:
+    """Return annual EDGAR facts available as of as_of_date (point-in-time).
+
+    Returns: {metric_name: [{"end": str, "val": float, "filed": str, "fy": int}, ...]},
+    sorted newest fiscal year first. Only 10-K / 10-K/A annual (fp="FY") records
+    with filed <= as_of_date are included. When multiple filings cover the same fiscal
+    year (e.g. amendments), only the one with the latest filed date is kept.
+
+    Raw JSON loading is LRU-cached in _load_cik_annual_facts (maxsize=300).
+    """
+    padded_cik = str(cik).zfill(10)
+    as_of_str = as_of_date.strftime("%Y-%m-%d")
+    all_facts = _load_cik_annual_facts(padded_cik, str(edgar_dir))
+
+    result: dict[str, list[dict[str, Any]]] = {}
+
+    for metric_name, records in all_facts.items():
+        # Point-in-time filter
+        filtered = [r for r in records if r["filed"] <= as_of_str]
+        if not filtered:
             continue
 
-        # De-duplicate by fiscal year — keep the record with the latest filed date
+        # Dedup by fiscal year — keep latest filed within the cutoff
         by_fy: dict[Any, dict[str, Any]] = {}
-        for rec in best_records:
+        for rec in filtered:
             fy_key = rec.get("fy") or rec["end"][:4]
             existing = by_fy.get(fy_key)
             if existing is None or rec["filed"] > existing["filed"]:
@@ -366,6 +393,50 @@ def fetch_sp500_tickers() -> list[str]:
     tables = pd.read_html(url, storage_options={"User-Agent": "Mozilla/5.0 Crucible"})
     tickers = list(tables[0]["Symbol"].str.replace(".", "-", regex=False))
     logger.info("Fetched %d S&P 500 tickers from Wikipedia", len(tickers))
+    return tickers
+
+
+def fetch_russell1000_tickers(url: str) -> list[str]:
+    """Download iShares IWB holdings CSV and return equity ticker symbols.
+
+    The iShares CSV has 2 preamble rows before the actual header. We locate the
+    'Ticker' column header robustly, parse from there, and filter to Equity assets.
+    """
+    resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0 Crucible"}, timeout=30)
+    resp.raise_for_status()
+
+    lines = resp.text.splitlines()
+    header_idx: int | None = None
+    for i, line in enumerate(lines):
+        # iShares header row starts with "Ticker," or contains it as first field
+        if line.startswith("Ticker,") or line.startswith('"Ticker",'):
+            header_idx = i
+            break
+
+    if header_idx is None:
+        raise ValueError(
+            "Could not locate 'Ticker' column header in iShares IWB CSV. "
+            f"First 5 lines: {lines[:5]}"
+        )
+
+    csv_text = "\n".join(lines[header_idx:])
+    df = pd.read_csv(io.StringIO(csv_text))
+
+    if "Asset Class" in df.columns:
+        df = df[df["Asset Class"] == "Equity"]
+
+    tickers = (
+        df["Ticker"]
+        .dropna()
+        .astype(str)
+        .str.strip()
+        .replace("", pd.NA)
+        .dropna()
+        .str.replace(".", "-", regex=False)
+        .tolist()
+    )
+
+    logger.info("Fetched %d Russell 1000 tickers from iShares IWB", len(tickers))
     return tickers
 
 
