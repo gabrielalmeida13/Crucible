@@ -31,7 +31,13 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / ".env")
 
-from crucible.backtest import BacktestConfig, generate_report, run_backtest, run_sensitivity
+from crucible.backtest import (
+    BacktestConfig,
+    generate_report,
+    generate_ticker_contribution,
+    run_backtest,
+    run_sensitivity,
+)
 from crucible.config import CrucibleConfig
 from crucible.fetcher import _load_cik_mapping, _to_float, fetch_financials, fetch_sp500_tickers
 
@@ -46,7 +52,8 @@ PRICE_FETCH_END   = "2024-01-31"  # covers 12-month hit-rate lookforward from De
 
 TRAIN_MONTHS  = 24
 TOP_N         = 20
-REPORT_PATH   = ROOT / "data" / "backtest_report.md"
+REPORT_PATH              = ROOT / "data" / "backtest_report.md"
+TICKER_CONTRIBUTION_PATH = ROOT / "data" / "ticker_contribution.md"
 EDGAR_DIR     = ROOT / "data" / "raw" / "edgar" / "companyfacts"
 CIK_MAP_PATH  = ROOT / "data" / "raw" / "edgar" / "cik_mapping.json"
 
@@ -287,6 +294,11 @@ def main() -> None:
     REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
     generate_report(result, sensitivity, REPORT_PATH, config)
     log.info("Report saved → %s", REPORT_PATH)
+
+    generate_ticker_contribution(
+        result, TICKER_CONTRIBUTION_PATH, roic_threshold=config.filters.roic_min
+    )
+    log.info("Ticker contribution report saved → %s", TICKER_CONTRIBUTION_PATH)
     print("\n" + "═" * 70)
     print(REPORT_PATH.read_text())
 

@@ -19,11 +19,13 @@ from crucible.backtest import (
     _single_return,
     cumulative_return_series,
     generate_report,
+    generate_ticker_contribution,
     hit_rate,
     max_drawdown,
     run_backtest,
     run_sensitivity,
     sharpe_ratio,
+    ticker_contribution_analysis,
     total_return,
 )
 from crucible.config import CrucibleConfig, FilterThresholds
@@ -707,3 +709,124 @@ def test_generate_report_empty_monthly_results_does_not_crash(tmp_path: Path) ->
     out = tmp_path / "r.md"
     generate_report(result, pd.DataFrame(), out)
     assert out.exists()
+
+
+# ---------------------------------------------------------------------------
+# ticker_contribution_analysis
+# ---------------------------------------------------------------------------
+
+
+def _make_result_with_returns(
+    tickers_by_month: list[dict[str, float]],
+) -> BacktestResult:
+    """Build BacktestResult where each monthly result has ticker_returns pre-set."""
+    monthly = [
+        MonthlyResult(
+            date=_DATES[i],
+            portfolio_return=float(sum(v for v in tr.values()) / max(len(tr), 1)),
+            benchmark_return=0.0,
+            n_picks=len(tr),
+            tickers=list(tr.keys()),
+            ticker_returns=tr,
+        )
+        for i, tr in enumerate(tickers_by_month)
+    ]
+    return BacktestResult(monthly_results=monthly, hit_rate_returns=[], bt_config=BacktestConfig())
+
+
+def test_ticker_contribution_analysis_empty_result() -> None:
+    result = BacktestResult(monthly_results=[], hit_rate_returns=[], bt_config=BacktestConfig())
+    df = ticker_contribution_analysis(result)
+    assert df.empty
+
+
+def test_ticker_contribution_analysis_sums_correctly() -> None:
+    result = _make_result_with_returns([
+        {"AAPL": 0.10, "MSFT": 0.05},
+        {"AAPL": 0.08, "GOOG": 0.03},
+    ])
+    df = ticker_contribution_analysis(result)
+    aapl = df[df["ticker"] == "AAPL"].iloc[0]
+    assert aapl["pick_count"] == 2
+    assert aapl["total_contribution"] == pytest.approx(0.18)
+    assert aapl["avg_return_pct"] == pytest.approx(9.0)
+
+
+def test_ticker_contribution_analysis_sorted_descending() -> None:
+    result = _make_result_with_returns([
+        {"LOW": 0.01, "HIGH": 0.20, "MID": 0.10},
+    ])
+    df = ticker_contribution_analysis(result)
+    assert df.iloc[0]["ticker"] == "HIGH"
+    assert df.iloc[1]["ticker"] == "MID"
+    assert df.iloc[2]["ticker"] == "LOW"
+
+
+def test_ticker_contribution_analysis_pick_counts() -> None:
+    result = _make_result_with_returns([
+        {"A": 0.05},
+        {"A": 0.03, "B": 0.02},
+        {"B": 0.01},
+    ])
+    df = ticker_contribution_analysis(result)
+    counts = dict(zip(df["ticker"], df["pick_count"]))
+    assert counts["A"] == 2
+    assert counts["B"] == 2
+
+
+def test_run_backtest_populates_ticker_returns() -> None:
+    fund_dates = _DATES[:6]
+    price_dates = _DATES[:8]
+    bt_cfg = BacktestConfig(train_months=3, top_n=5, hit_rate_months=2)
+    funds = _make_fundamentals(fund_dates, ["G1", "G2"], ["B1"])
+    prices = _make_prices(price_dates, {"G1": 0.02, "G2": 0.02, "B1": 0.0, "SP500": 0.005})
+    result = run_backtest(funds, prices, _cfg(), bt_cfg)
+    for m in result.monthly_results:
+        assert isinstance(m.ticker_returns, dict)
+        for t, r in m.ticker_returns.items():
+            assert t in m.tickers
+            assert isinstance(r, float)
+
+
+# ---------------------------------------------------------------------------
+# generate_ticker_contribution
+# ---------------------------------------------------------------------------
+
+
+def test_generate_ticker_contribution_creates_file(tmp_path: Path) -> None:
+    result = _make_result_with_returns([
+        {"AAPL": 0.10, "MSFT": 0.05},
+        {"AAPL": 0.08, "GOOG": -0.02},
+    ])
+    out = tmp_path / "contrib.md"
+    generate_ticker_contribution(result, out, roic_threshold=0.15)
+    assert out.exists()
+
+
+def test_generate_ticker_contribution_empty_result(tmp_path: Path) -> None:
+    result = BacktestResult(monthly_results=[], hit_rate_returns=[], bt_config=BacktestConfig())
+    out = tmp_path / "contrib.md"
+    generate_ticker_contribution(result, out)
+    assert out.exists()
+
+
+def test_generate_ticker_contribution_contains_key_sections(tmp_path: Path) -> None:
+    tickers = {f"T{i:02d}": 0.01 * i for i in range(1, 25)}
+    result = _make_result_with_returns([tickers])
+    out = tmp_path / "contrib.md"
+    generate_ticker_contribution(result, out)
+    content = out.read_text()
+    assert "Top 5 concentration" in content
+    assert "Top 20 contributors" in content
+    assert "Full contribution table" in content
+
+
+def test_generate_ticker_contribution_top5_pct_in_output(tmp_path: Path) -> None:
+    result = _make_result_with_returns([
+        {"BIG": 0.50, "MED": 0.10, "SML": 0.05, "XS1": 0.01, "XS2": 0.01, "XS3": 0.01},
+    ])
+    out = tmp_path / "contrib.md"
+    generate_ticker_contribution(result, out)
+    content = out.read_text()
+    assert "%" in content
+    assert "BIG" in content

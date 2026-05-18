@@ -76,6 +76,7 @@ class MonthlyResult:
     benchmark_return: float
     n_picks: int
     tickers: list[str] = field(default_factory=list)
+    ticker_returns: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -172,7 +173,13 @@ def run_backtest(
         # 1-month portfolio and benchmark returns
         next_month = _advance(test_date, price_idx, bt_config.holding_months)
         if next_month is not None and test_date in price_idx:
-            port_ret = _portfolio_return(picks, test_date, next_month, prices)
+            tkr_rets = {
+                t: r
+                for t in picks
+                for r in (_single_return(t, test_date, next_month, prices),)
+                if r is not None
+            }
+            port_ret = float(np.mean(list(tkr_rets.values()))) if tkr_rets else 0.0
             bench_ret = _benchmark_return(
                 test_date, next_month, prices, bt_config.benchmark_col
             )
@@ -182,6 +189,7 @@ def run_backtest(
                 benchmark_return=bench_ret,
                 n_picks=len(picks),
                 tickers=picks,
+                ticker_returns=tkr_rets,
             ))
 
         # 12-month returns for hit rate (one observation per pick per month)
@@ -327,6 +335,141 @@ def generate_report(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines), encoding="utf-8")
     logger.info("Backtest report saved: %s", output_path)
+
+
+def ticker_contribution_analysis(result: BacktestResult) -> pd.DataFrame:
+    """Return per-ticker contribution stats across all monthly results.
+
+    Columns: ticker, pick_count, total_contribution, avg_return_pct
+    total_contribution = sum of individual 1-month returns each time the ticker
+    was held.  Equal-weighted portfolio means contribution = return / n_picks
+    at the portfolio level, but we report raw individual return here.
+    """
+    from collections import defaultdict
+
+    pick_counts: dict[str, int] = defaultdict(int)
+    total_returns: dict[str, float] = defaultdict(float)
+
+    for m in result.monthly_results:
+        for ticker, ret in m.ticker_returns.items():
+            pick_counts[ticker] += 1
+            total_returns[ticker] += ret
+
+    all_tickers = set(pick_counts) | set(total_returns)
+    rows = []
+    for t in sorted(all_tickers):
+        cnt = pick_counts[t]
+        tot = total_returns[t]
+        rows.append({
+            "ticker": t,
+            "pick_count": cnt,
+            "total_contribution": tot,
+            "avg_return_pct": (tot / cnt * 100.0) if cnt > 0 else 0.0,
+        })
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    return df.sort_values("total_contribution", ascending=False).reset_index(drop=True)
+
+
+def generate_ticker_contribution(
+    result: BacktestResult,
+    output_path: Path,
+    roic_threshold: float = 0.15,
+    top_n: int = 20,
+) -> None:
+    """Write per-ticker contribution analysis to a Markdown file with ASCII bar chart."""
+    df = ticker_contribution_analysis(result)
+    if df.empty:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("_No ticker data available._\n", encoding="utf-8")
+        return
+
+    total_all = df["total_contribution"].sum()
+    top5 = df.head(5)
+    top5_sum = top5["total_contribution"].sum()
+    top5_pct = top5_sum / total_all * 100.0 if total_all else 0.0
+
+    top_df = df.head(top_n)
+    max_contrib = top_df["total_contribution"].max()
+    bar_width = 40
+
+    def _bar(val: float) -> str:
+        filled = int(round(bar_width * val / max_contrib)) if max_contrib > 0 else 0
+        return "█" * filled + "░" * (bar_width - filled)
+
+    bar_lines = []
+    bar_lines.append("```")
+    bar_lines.append(f"{'Ticker':<8} {'Bar':<{bar_width + 2}} {'Total':>8}  {'Picks':>5}  {'Avg%':>6}")
+    bar_lines.append("-" * (bar_width + 34))
+    for _, row in top_df.iterrows():
+        bar_lines.append(
+            f"{row['ticker']:<8} {_bar(row['total_contribution'])}  "
+            f"{row['total_contribution']:>+7.2%}  "
+            f"{int(row['pick_count']):>5}  "
+            f"{row['avg_return_pct']:>+5.1f}%"
+        )
+    bar_lines.append("```")
+
+    all_table_rows = []
+    for _, row in df.head(40).iterrows():
+        all_table_rows.append(
+            f"| {row['ticker']} | {int(row['pick_count'])} "
+            f"| {row['total_contribution']:+.2%} | {row['avg_return_pct']:+.1f}% |"
+        )
+
+    lines: list[str] = [
+        "# Ticker Contribution Analysis",
+        "",
+        f"**ROIC threshold:** {roic_threshold:.0%}  "
+        f"**Test months:** {len(result.monthly_results)}  "
+        f"**Total tickers ever picked:** {len(df)}",
+        "",
+        "---",
+        "",
+        "## Top 5 concentration",
+        "",
+        f"| Ticker | Picks | Total contribution | Avg monthly return |",
+        f"|--------|-------|-------------------|-------------------|",
+    ]
+    for _, row in top5.iterrows():
+        lines.append(
+            f"| {row['ticker']} | {int(row['pick_count'])} "
+            f"| {row['total_contribution']:+.2%} | {row['avg_return_pct']:+.1f}% |"
+        )
+    lines += [
+        "",
+        f"**Top 5 tickers represent {top5_pct:.1f}% of total gross contribution "
+        f"({top5_sum:+.2%} out of {total_all:+.2%})**",
+        "",
+        "---",
+        "",
+        f"## Top {top_n} contributors (bar chart)",
+        "",
+        "> Each bar = cumulative sum of individual 1-month returns across all months the ticker was held.",
+        "",
+    ] + bar_lines + [
+        "",
+        "---",
+        "",
+        "## Full contribution table (top 40)",
+        "",
+        "| Ticker | Picks | Total contribution | Avg monthly return |",
+        "|--------|-------|-------------------|-------------------|",
+    ] + all_table_rows + [
+        "",
+        "---",
+        "",
+        "> **Note:** *Total contribution* = sum of individual 1-month returns each time the ticker",
+        "> appeared in the portfolio. Because the portfolio is equal-weighted, the portfolio-level",
+        "> contribution for month M is `ticker_return / n_picks`. The raw individual return is shown",
+        "> here to make each ticker's quality visible independently of portfolio size.",
+    ]
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    logger.info("Ticker contribution report saved: %s", output_path)
 
 
 # ---------------------------------------------------------------------------
