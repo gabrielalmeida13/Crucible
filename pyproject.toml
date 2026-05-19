@@ -16,6 +16,8 @@ dependencies = [
     "requests>=2.34.2",
     "edgartools>=2.0",
     "psutil>=5.9",
+    "scikit-learn>=1.4",
+    "xgboost>=2.0",
 ]
 
 [dependency-groups]
