@@ -151,6 +151,20 @@ def test_build_feature_matrix_empty_when_no_dates_in_window() -> None:
     assert len(y) == 0
 
 
+def test_build_feature_matrix_tz_aware_fund_dates() -> None:
+    """fund_by_date with UTC keys and tz-naive start/end bounds must not raise."""
+    tickers = ["AAPL", "MSFT", "SP500"]
+    dates = pd.date_range("2010-01-31", periods=15, freq="ME", tz="UTC")
+    prices = _make_prices(tickers, list(dates), growth=0.01)
+    fund_by_date = {d: _make_snapshot(["AAPL", "MSFT"]) for d in dates}
+
+    # tz-naive bounds — must compare cleanly with UTC keys
+    start = pd.Timestamp("2010-01-31")
+    end = pd.Timestamp("2010-03-31")
+    X, y = build_feature_matrix(fund_by_date, prices, start_date=start, end_date=end)
+    assert len(X) >= 0  # no exception raised
+
+
 def test_build_feature_matrix_drops_rows_without_forward_price() -> None:
     """Tickers with no price data produce no rows."""
     tickers = ["SP500"]  # AAPL is in fund but not in prices

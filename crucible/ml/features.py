@@ -77,10 +77,16 @@ def build_feature_matrix(
 
     Rows where the forward return cannot be computed are dropped from both X and y.
     Rows where the benchmark return is unavailable are also dropped.
+
+    add_roic_direction() is called here so the column is always present, but
+    callers processing multiple windows over the same fund_by_date may call it
+    once upfront themselves to avoid redundant work.
     """
-    add_roic_direction(fund_by_date)
+    if "roic_direction" not in next(iter(fund_by_date.values())).columns if fund_by_date else True:
+        add_roic_direction(fund_by_date)
 
     all_dates = sorted(fund_by_date.keys())
+    start_date, end_date = _align_tz(start_date, end_date, all_dates)
     window_dates = [d for d in all_dates if start_date <= d <= end_date]
 
     if not window_dates:
@@ -144,6 +150,28 @@ def build_feature_matrix(
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+
+
+def _align_tz(
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    reference_dates: list[pd.Timestamp],
+) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """Make start/end timezone-compatible with reference_dates.
+
+    If reference dates are tz-aware and bounds are tz-naive (or vice versa),
+    localize/strip so the comparison in build_feature_matrix doesn't raise.
+    """
+    if not reference_dates:
+        return start, end
+    ref_tz = reference_dates[0].tzinfo
+    if ref_tz is not None and start.tzinfo is None:
+        start = start.tz_localize(ref_tz)
+        end = end.tz_localize(ref_tz)
+    elif ref_tz is None and start.tzinfo is not None:
+        start = start.tz_localize(None)
+        end = end.tz_localize(None)
+    return start, end
 
 
 def _empty_result() -> tuple[pd.DataFrame, pd.Series]:

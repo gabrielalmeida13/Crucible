@@ -102,6 +102,11 @@ def main() -> None:
     attach_momentum(fund_by_date, prices)
     logger.info("Snapshots complete: %d dates", len(fund_by_date))
 
+    # Pre-compute roic_direction once for all snapshots — avoids redundant work
+    # when build_feature_matrix is called twice (train + val windows).
+    from crucible.ml.features import add_roic_direction
+    add_roic_direction(fund_by_date)
+
     logger.info("Building training feature matrix (2010–2021)...")
     X_train, y_train = build_feature_matrix(
         fund_by_date, prices,
