@@ -1,51 +1,15 @@
 """Phase 3a ML training and validation entry point.
 
-# Usage
-#   python scripts/run_phase3a.py
-#
-# Train window : 2010-01-01 – 2021-12-31
-# Validation   : 2022-01-01 – 2023-12-31
-# Held-out     : 2024-01-01 – present  (NOT evaluated here)
-#
-# Outputs:
-#   data/models/phase3a_model.pkl       — serialised ModelArtifact
-#   data/results/phase3a_validation.md  — accuracy / confusion matrix / feature importance
+Usage:
+    python scripts/run_phase3a.py
 
-from __future__ import annotations
+Train window : 2010-01-01 – 2021-12-31
+Validation   : 2022-01-01 – 2023-12-31
+Held-out     : 2024-01-01 – present  (NOT evaluated here)
 
-import logging
-import sys
-from pathlib import Path
-
-import pandas as pd
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
-from crucible.config import load_config
-from crucible.ml.features import FEATURE_COLS, build_feature_matrix
-from crucible.ml.model import (
-    evaluate,
-    feature_importances,
-    save_model,
-    train_phase3a,
-)
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
-)
-logger = logging.getLogger(__name__)
-
-EDGAR_DIR   = PROJECT_ROOT / "data" / "raw" / "edgar"
-MODEL_PATH  = PROJECT_ROOT / "data" / "models" / "phase3a_model.pkl"
-REPORT_PATH = PROJECT_ROOT / "data" / "results" / "phase3a_validation.md"
-
-TRAIN_START = pd.Timestamp("2010-01-01")
-TRAIN_END   = pd.Timestamp("2021-12-31")
-VAL_START   = pd.Timestamp("2022-01-01")
-VAL_END     = pd.Timestamp("2023-12-31")
-# 2024+ is held-out — never evaluate here
+Outputs:
+    data/models/phase3a_model.pkl       — serialised ModelArtifact
+    data/results/phase3a_validation.md  — accuracy / confusion matrix / feature importance
 """
 
 from __future__ import annotations
@@ -59,7 +23,6 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from crucible.config import load_config
 from crucible.ml.features import FEATURE_COLS, build_feature_matrix
 from crucible.ml.model import (
     evaluate,
@@ -74,23 +37,70 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-EDGAR_DIR   = PROJECT_ROOT / "data" / "raw" / "edgar"
-MODEL_PATH  = PROJECT_ROOT / "data" / "models" / "phase3a_model.pkl"
-REPORT_PATH = PROJECT_ROOT / "data" / "results" / "phase3a_validation.md"
+EDGAR_DIR    = PROJECT_ROOT / "data" / "raw" / "edgar" / "companyfacts"
+CIK_MAP_PATH = PROJECT_ROOT / "data" / "raw" / "edgar" / "cik_mapping.json"
+MODEL_PATH   = PROJECT_ROOT / "data" / "models" / "phase3a_model.pkl"
+REPORT_PATH  = PROJECT_ROOT / "data" / "results" / "phase3a_validation.md"
 
 TRAIN_START = pd.Timestamp("2010-01-01")
 TRAIN_END   = pd.Timestamp("2021-12-31")
 VAL_START   = pd.Timestamp("2022-01-01")
 VAL_END     = pd.Timestamp("2023-12-31")
+# 2024+ is held-out — never evaluate here
+
+_SNAPSHOT_START   = pd.Timestamp("2010-01-31", tz="UTC")
+_SNAPSHOT_END     = pd.Timestamp("2023-12-31", tz="UTC")
+_PRICE_START      = "2009-01-01"
+_PRICE_END        = "2024-12-31"  # covers 12m forward label from Dec 2023
+_SNAPSHOT_WORKERS = 4
+_PRICE_WORKERS    = 20
 
 
 def main() -> None:
-    config = load_config()
+    # Import loading primitives from run_backtest — same EDGAR/price infrastructure
+    from scripts.run_backtest import (  # type: ignore[import]
+        _build_fundamentals_parallel,
+        _fetch_prices_parallel,
+    )
+    from crucible.fetcher import _load_cik_mapping, fetch_sp500_tickers
+    from crucible.backtest import attach_momentum
 
-    logger.info("Loading fund_by_date snapshots from EDGAR bulk data...")
-    from scripts.run_backtest import _load_fund_by_date, _load_prices  # type: ignore[import]
+    if not CIK_MAP_PATH.exists():
+        logger.error(
+            "CIK mapping not found at %s. Run scripts/download_edgar_bulk.py first.",
+            CIK_MAP_PATH,
+        )
+        sys.exit(1)
+    if not EDGAR_DIR.exists():
+        logger.error(
+            "EDGAR companyfacts not found at %s. Run scripts/download_edgar_bulk.py first.",
+            EDGAR_DIR,
+        )
+        sys.exit(1)
 
-    fund_by_date, prices = _load_fund_by_date(EDGAR_DIR, config)
+    cik_map = _load_cik_mapping(CIK_MAP_PATH)
+    monthly_dates = pd.date_range(_SNAPSHOT_START, _SNAPSHOT_END, freq="ME", tz="UTC")
+
+    logger.info("Fetching S&P 500 tickers...")
+    tickers = fetch_sp500_tickers()
+    logger.info("Universe: %d tickers", len(tickers))
+
+    logger.info(
+        "Fetching prices (%s – %s, %d workers)...",
+        _PRICE_START, _PRICE_END, _PRICE_WORKERS,
+    )
+    prices = _fetch_prices_parallel(tickers, _PRICE_START, _PRICE_END)
+    if prices.empty:
+        logger.error("No price data — aborting.")
+        sys.exit(1)
+
+    logger.info(
+        "Building %d monthly snapshots (%d workers)...",
+        len(monthly_dates), _SNAPSHOT_WORKERS,
+    )
+    fund_by_date = _build_fundamentals_parallel(tickers, monthly_dates, EDGAR_DIR, cik_map, prices)
+    attach_momentum(fund_by_date, prices)
+    logger.info("Snapshots complete: %d dates", len(fund_by_date))
 
     logger.info("Building training feature matrix (2010–2021)...")
     X_train, y_train = build_feature_matrix(
@@ -180,7 +190,7 @@ def _write_report(
         "",
         f"**Accuracy on 2022–2023 validation set: {acc:.3f} ({acc:.1%})**",
         "",
-        f"Threshold for acceptability: 55.0%",
+        "Threshold for acceptability: 55.0%",
         f"Result: {'PASS' if acc >= 0.55 else 'BELOW THRESHOLD'}",
         "",
         "---",
