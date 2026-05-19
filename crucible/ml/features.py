@@ -56,8 +56,8 @@ def add_roic_direction(
             df["roic_direction"] = np.nan
             continue
         prior_df = fund_by_date[prior_date]
-        current = df["roic_proxy_avg"]
-        prior = prior_df["roic_proxy_avg"].reindex(df.index)
+        current = pd.to_numeric(df["roic_proxy_avg"], errors="coerce")
+        prior = pd.to_numeric(prior_df["roic_proxy_avg"].reindex(df.index), errors="coerce")
         direction = (current > prior).astype(float)
         direction[current.isna() | prior.isna()] = np.nan
         df["roic_direction"] = direction
