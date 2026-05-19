@@ -170,14 +170,25 @@ def load_model(path: Path) -> ModelArtifact:
 
 
 def _compute_medians(X: pd.DataFrame) -> dict[str, float]:
-    """Compute per-column medians from training data (used for imputation)."""
-    return {col: float(X[col].median()) for col in X.columns}
+    """Compute per-column medians from training data (used for imputation).
+
+    Entirely-NaN columns (e.g. insider_buy_ratio when disabled) get 0.0 so
+    that fillna downstream always receives a finite value.
+    """
+    result: dict[str, float] = {}
+    for col in X.columns:
+        med = X[col].median()
+        result[col] = float(med) if pd.notna(med) else 0.0
+    return result
 
 
 def _impute(X: pd.DataFrame, medians: dict[str, float]) -> pd.DataFrame:
-    """Fill NaN with pre-computed training medians; unknown columns get 0.0."""
+    """Fill NaN with pre-computed training medians; unknown or NaN medians get 0.0."""
     X = X.copy()
     for col in X.columns:
         if X[col].isna().any():
-            X[col] = X[col].fillna(medians.get(col, 0.0))
+            fill_val = medians.get(col, 0.0)
+            if pd.isna(fill_val):
+                fill_val = 0.0
+            X[col] = X[col].fillna(fill_val)
     return X

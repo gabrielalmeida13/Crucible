@@ -71,6 +71,25 @@ def test_impute_unknown_column_gets_zero() -> None:
     assert result["a"].iloc[0] == 0.0
 
 
+def test_compute_medians_all_nan_column_returns_zero() -> None:
+    """Entirely-NaN column (e.g. insider_buy_ratio) must produce 0.0, not NaN."""
+    X = pd.DataFrame({"a": [1.0, 2.0], "b": [np.nan, np.nan]})
+    meds = _compute_medians(X)
+    assert meds["a"] == 1.5
+    assert meds["b"] == 0.0
+
+
+def test_train_with_all_nan_column_does_not_crash() -> None:
+    """Model must train successfully when one feature is entirely NaN (like insider_buy_ratio)."""
+    X_tr, y_tr, X_vl, y_vl = _xy(n_features=5)
+    # Add a completely-NaN column simulating insider_buy_ratio
+    X_tr["insider"] = np.nan
+    X_vl["insider"] = np.nan
+    artifact = train_phase3a(X_tr, y_tr, X_vl, y_vl, pd.Timestamp("2021-12-31"))
+    assert isinstance(artifact, ModelArtifact)
+    assert artifact.imputation_values["insider"] == 0.0
+
+
 # ---------------------------------------------------------------------------
 # Tests: train_phase3a
 # ---------------------------------------------------------------------------
