@@ -41,6 +41,7 @@ import pandas as pd
 from crucible.config import CrucibleConfig, FilterThresholds
 from crucible.filters import apply_filters
 from crucible.scorer import score
+from crucible.snapshot import attach_momentum as attach_momentum  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +149,7 @@ def run_backtest(
     monthly_results: list[MonthlyResult] = []
     hit_rate_returns: list[float] = []
 
-    test_dates = dates[bt_config.train_months:]
+    test_dates = dates[bt_config.train_months::bt_config.holding_months]
     logger.info(
         "Walk-forward: %d training months, %d test months",
         bt_config.train_months, len(test_dates),
