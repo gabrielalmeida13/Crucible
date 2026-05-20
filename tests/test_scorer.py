@@ -210,12 +210,18 @@ def test_region_normalization_separates_ifrs_from_us_gaap() -> None:
 
 
 def test_composite_score_formula() -> None:
-    """composite_score = 0.6*quality + 0.4*valuation + fx_penalty."""
+    """composite_score = 0.6*quality + 0.3*valuation + 0.1*momentum + fx_penalty."""
     cfg = load_config()
     df = _df(_base_row(currency="USD"))
     result = score(df, cfg)
     row = result.iloc[0]
-    expected = 0.6 * row["quality_score"] + 0.4 * row["valuation_score"] + row["fx_penalty"]
+    w = cfg.score_weights
+    expected = (
+        w.quality * row["quality_score"]
+        + w.valuation * row["valuation_score"]
+        + w.momentum * row["momentum_score"]
+        + row["fx_penalty"]
+    )
     assert abs(row["composite_score"] - expected) < 1e-9
 
 
@@ -265,6 +271,40 @@ def test_score_no_temp_columns_leaked() -> None:
 def test_score_handles_all_nan_valuation() -> None:
     """score() must not raise when all valuation metrics are NaN."""
     cfg = load_config()
-    df = _df(_base_row(p_fcf=np.nan, ev_ebitda=np.nan))
+    df = _df(_base_row(p_fcf=np.nan, ev_ebitda=np.nan, p_e=np.nan))
     result = score(df, cfg)
     assert result.loc["T0", "valuation_score"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Track 2 config
+# ---------------------------------------------------------------------------
+
+def test_track2_score_weights_sum_to_one():
+    from crucible.config import Track2ScoreWeights
+    w = Track2ScoreWeights()
+    assert abs(w.growth_quality + w.momentum + w.valuation - 1.0) < 1e-9
+
+def test_track2_score_weights_custom_values_validate():
+    from crucible.config import Track2ScoreWeights
+    w = Track2ScoreWeights(growth_quality=0.60, momentum=0.20, valuation=0.20)
+    assert abs(w.growth_quality + w.momentum + w.valuation - 1.0) < 1e-9
+
+def test_track2_score_weights_invalid_raises():
+    from crucible.config import Track2ScoreWeights
+    with pytest.raises(ValueError):
+        Track2ScoreWeights(growth_quality=0.60, momentum=0.30, valuation=0.30)
+
+def test_track2_filter_thresholds_defaults():
+    from crucible.config import Track2FilterThresholds
+    t = Track2FilterThresholds()
+    assert t.revenue_growth_min_pct == 0.10
+    assert t.gross_margin_min == 0.30
+    assert t.fcf_positive_last2yr_min == 1
+    assert t.net_debt_ebitda_max == 5.0
+
+def test_crucible_config_has_track2_fields():
+    from crucible.config import CrucibleConfig
+    cfg = CrucibleConfig()
+    assert hasattr(cfg, "track2_filters")
+    assert hasattr(cfg, "track2_score_weights")

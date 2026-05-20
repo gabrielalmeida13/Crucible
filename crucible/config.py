@@ -19,6 +19,7 @@ class FilterThresholds:
     net_debt_ebitda_max: float = 3.0
     revenue_growth_positive_min_years: int = 3
     revenue_growth_lookback_years: int = 5
+    gross_margin_min_slope: float = -0.005
 
 
 @dataclass(frozen=True)
@@ -26,11 +27,38 @@ class ScoreWeights:
     """Layer 2 composite score weights. Must sum to 1.0."""
 
     quality: float = 0.60
-    valuation: float = 0.40
+    valuation: float = 0.30
+    momentum: float = 0.10
+    ml_score: float = 0.0  # non-zero only when ML model artifact is wired in
 
     def __post_init__(self) -> None:
-        if abs(self.quality + self.valuation - 1.0) > 1e-9:
-            raise ValueError("ScoreWeights must sum to 1.0")
+        total = self.quality + self.valuation + self.momentum + self.ml_score
+        if abs(total - 1.0) > 1e-9:
+            raise ValueError(f"ScoreWeights must sum to 1.0 (got {total})")
+
+
+@dataclass(frozen=True)
+class Track2FilterThresholds:
+    """Layer 1 hard-rule thresholds for Track 2 (Growth Inflection)."""
+
+    revenue_growth_min_pct: float = 0.10
+    gross_margin_min: float = 0.30
+    fcf_positive_last2yr_min: int = 1
+    net_debt_ebitda_max: float = 5.0
+
+
+@dataclass(frozen=True)
+class Track2ScoreWeights:
+    """Layer 2 composite score weights for Track 2. Must sum to 1.0."""
+
+    growth_quality: float = 0.50
+    momentum: float = 0.30
+    valuation: float = 0.20
+
+    def __post_init__(self) -> None:
+        total = self.growth_quality + self.momentum + self.valuation
+        if abs(total - 1.0) > 1e-9:
+            raise ValueError(f"Track2ScoreWeights must sum to 1.0 (got {total})")
 
 
 @dataclass(frozen=True)
@@ -62,6 +90,8 @@ class CrucibleConfig:
     filters: FilterThresholds = field(default_factory=FilterThresholds)
     score_weights: ScoreWeights = field(default_factory=ScoreWeights)
     fx: FXConfig = field(default_factory=FXConfig)
+    track2_filters: Track2FilterThresholds = field(default_factory=Track2FilterThresholds)
+    track2_score_weights: Track2ScoreWeights = field(default_factory=Track2ScoreWeights)
 
 
 def load_config() -> CrucibleConfig:
