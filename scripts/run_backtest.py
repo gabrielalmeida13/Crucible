@@ -1,6 +1,24 @@
 #!/usr/bin/env python3
 """3×2 matrix backtest: holding_months=[1, 3, 12] × universe=['SP500', 'RUSSELL1000'].
 
+Usage
+-----
+  # Full 3×2 matrix (default)
+  python scripts/run_backtest.py
+
+  # Single universe, all holding periods
+  python scripts/run_backtest.py --universe SP500
+
+  # Single holding period, all universes
+  python scripts/run_backtest.py --holding 1
+
+  # Single combination
+  python scripts/run_backtest.py --universe SP500 --holding 1
+
+  Flags:
+    --universe  SP500 | RUSSELL1000          (default: both)
+    --holding   1 | 3 | 12                  (default: all three)
+
 Walk-forward design
 -------------------
   Train 24 months, walk forward 1 month at a time.
@@ -29,6 +47,8 @@ Requirements
 
 from __future__ import annotations
 
+import argparse
+import json
 import logging
 import sys
 import threading
@@ -46,6 +66,7 @@ load_dotenv(ROOT / ".env")
 
 from crucible.backtest import (
     BacktestConfig,
+    attach_momentum,
     generate_picks_csv,
     generate_report,
     generate_ticker_contribution,
@@ -59,10 +80,25 @@ from crucible.backtest import (
 from crucible.config import CrucibleConfig
 from crucible.fetcher import (
     _load_cik_mapping,
-    _to_float,
-    fetch_financials,
+    _load_dei_shares_cached,
     fetch_russell1000_tickers,
     fetch_sp500_tickers,
+)
+from crucible.filters import (
+    filter_fcf_consistency,
+    filter_gross_margin_stability,
+    filter_leverage,
+    filter_revenue_growth,
+    filter_roic,
+)
+from crucible.snapshot import (
+    build_snapshots_parallel,
+    compute_snapshot_row as _compute_snapshot_row,
+    get_metric as _get_metric,
+    get_raw_pivoted as _get_raw_pivoted,
+    linear_slope as _linear_slope,
+    load_raw_annual_facts as _load_raw_annual_facts,
+    prices_at as _prices_at,
 )
 
 # ---------------------------------------------------------------------------
@@ -80,18 +116,17 @@ PRICE_FETCH_END   = "2024-01-31"   # covers 12-month hit-rate lookforward from D
 TRAIN_MONTHS = 24
 TOP_N        = 20
 
-RESULTS_DIR  = ROOT / "data" / "results"
-EDGAR_DIR    = ROOT / "data" / "raw" / "edgar" / "companyfacts"
-CIK_MAP_PATH = ROOT / "data" / "raw" / "edgar" / "cik_mapping.json"
-
-IWB_URL = (
-    "https://www.ishares.com/us/products/239707/ishares-russell-1000-etf/"
-    "1467271812596.ajax?fileType=csv&fileName=IWB_holdings&dataType=fund"
-)
+RESULTS_DIR      = ROOT / "data" / "results"
+DIAGNOSTICS_DIR  = ROOT / "data" / "diagnostics"
+EDGAR_DIR        = ROOT / "data" / "raw" / "edgar" / "companyfacts"
+CIK_MAP_PATH     = ROOT / "data" / "raw" / "edgar" / "cik_mapping.json"
 
 PRICE_WORKERS    = 20    # I/O-bound yfinance
 SNAPSHOT_WORKERS = 4     # memory-safe EDGAR snapshot workers
 MEMORY_LOG_SECS  = 600   # log RSS every 10 minutes
+
+# Enable for monthly screener runs only — too slow for full backtest (62k API calls).
+ENABLE_INSIDER_FORM4 = False
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -119,89 +154,128 @@ def _memory_monitor(stop_event: threading.Event) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Snapshot helpers
+# Insider / buyback signal helpers
 # ---------------------------------------------------------------------------
 
+import os as _os
+import requests as _requests
 
-def _linear_slope(values: list[float]) -> float | None:
-    """OLS slope for a list of evenly-spaced values."""
-    n = len(values)
-    if n < 2:
-        return None
-    mean_x = (n - 1) / 2.0
-    mean_y = sum(values) / n
-    num = sum((i - mean_x) * (values[i] - mean_y) for i in range(n))
-    den = sum((i - mean_x) ** 2 for i in range(n))
-    return num / den if den else 0.0
+_EDGAR_UA: str = _os.environ.get("EDGAR_USER_AGENT", "Crucible gabrielserens@gmail.com")
+
+# Per-process caches — avoids redundant network round-trips within a single run.
+_SUBMISSIONS_CACHE: dict[str, dict] = {}   # CIK10 → SEC submissions JSON
+_FORM4_SIGNAL_CACHE: dict[tuple[str, str], float | None] = {}  # (CIK10, as_of) → signal
 
 
-def _compute_snapshot_row(ticker: str, pivoted: dict[str, pd.Series]) -> dict:
-    """Derive the processed row that apply_filters() and score() expect."""
-    rev    = pivoted.get("Total Revenue",             pd.Series(dtype=float))
-    gp     = pivoted.get("Gross Profit",              pd.Series(dtype=float))
-    ni     = pivoted.get("Net Income",                pd.Series(dtype=float))
-    fcf    = pivoted.get("Free Cash Flow",            pd.Series(dtype=float))
-    td     = pivoted.get("Total Debt",                pd.Series(dtype=float))
-    cash   = pivoted.get("Cash And Cash Equivalents", pd.Series(dtype=float))
-    ebitda = pivoted.get("EBITDA",                    pd.Series(dtype=float))
-    equity = pivoted.get("Total Equity",              pd.Series(dtype=float))
+def _compute_buyback_signal(cik: str, as_of_date: pd.Timestamp) -> float | None:
+    """Year-over-year change in shares outstanding from EDGAR DEI 10-K filings.
 
-    data_years = len(rev)
-
-    roic_vals: list[float] = []
-    for fy in ni.index:
-        ni_v = _to_float(ni.get(fy))
-        eq_v = _to_float(equity.get(fy))
-        td_v = _to_float(td.get(fy))
-        if ni_v is not None and eq_v is not None and td_v is not None:
-            denom = eq_v + td_v
-            if denom > 0:
-                roic_vals.append(ni_v / denom)
-    roic_avg = sum(roic_vals) / len(roic_vals) if roic_vals else None
-
-    fcf_vals   = [_to_float(v) for v in fcf.values]
-    fcf_pos    = float(sum(1 for v in fcf_vals if v is not None and v > 0))
-    fcf_latest = _to_float(fcf.iloc[-1]) if not fcf.empty else None
-
-    td_last = _to_float(td.iloc[-1])     if not td.empty     else None
-    ca_last = _to_float(cash.iloc[-1])   if not cash.empty   else None
-    eb_last = _to_float(ebitda.iloc[-1]) if not ebitda.empty else None
-    nd_eb: float | None = None
-    if td_last is not None and ca_last is not None and eb_last and eb_last > 0:
-        nd_eb = (td_last - ca_last) / eb_last
-
-    rev_vals = [_to_float(v) for v in rev.values if _to_float(v) is not None]
-    rev_growth = (
-        float(sum(1 for i in range(1, len(rev_vals)) if rev_vals[i] > rev_vals[i - 1]))
-        if len(rev_vals) >= 2 else None
+    Returns (prior_shares − current_shares) / prior_shares.
+    Positive = net buyback; negative = net dilution.
+    """
+    records = _load_dei_shares_cached(cik.zfill(10), str(EDGAR_DIR))
+    as_of_str = as_of_date.strftime("%Y-%m-%d")
+    annual = sorted(
+        [r for r in records if r["form"] in {"10-K", "10-K/A"} and r["filed"] <= as_of_str],
+        key=lambda r: r["filed"],
+        reverse=True,
     )
+    if len(annual) < 2:
+        return None
+    current = annual[0]["val"]
+    # Find the most recent annual filing approximately 1 year before the latest
+    latest_dt = pd.Timestamp(annual[0]["filed"])
+    window_lo = (latest_dt - pd.DateOffset(months=18)).strftime("%Y-%m-%d")
+    window_hi = (latest_dt - pd.DateOffset(months=6)).strftime("%Y-%m-%d")
+    prior_candidates = [r for r in annual[1:] if window_lo <= r["filed"] <= window_hi]
+    if not prior_candidates:
+        return None
+    prior = prior_candidates[0]["val"]
+    return (prior - current) / prior if prior > 0 else None
 
-    gm_vals: list[float] = []
-    for fy in rev.index:
-        r = _to_float(rev.get(fy))
-        g = _to_float(gp.get(fy))
-        if r and r > 0 and g is not None:
-            gm_vals.append(g / r)
 
-    return {
-        "ticker":                        ticker,
-        "sector":                        None,
-        "sub_industry":                  None,
-        "currency":                      "USD",
-        "p_e":                           None,
-        "p_fcf":                         None,
-        "ev_ebitda":                     None,
-        "data_years":                    data_years,
-        "insufficient_data":             data_years < 3,
-        "roic_proxy_avg":                roic_avg,
-        "fcf_latest":                    fcf_latest,
-        "fcf_positive_years":            fcf_pos if not fcf.empty else None,
-        "net_debt_ebitda":               nd_eb,
-        "revenue_growth_positive_years": rev_growth,
-        "gross_margin_latest":           gm_vals[-1] if gm_vals else None,
-        "gross_margin_avg":              sum(gm_vals) / len(gm_vals) if gm_vals else None,
-        "gross_margin_trend_slope":      _linear_slope(gm_vals),
-    }
+def _compute_insider_signal(
+    cik: str,
+    as_of_date: pd.Timestamp,
+    shares_outstanding: float | None,
+) -> float | None:
+    """Net insider share acquisitions (buys − sells) via Form 4 / 6 months prior to as_of_date.
+
+    Uses the EDGAR submissions JSON to list filings, then downloads Form 4 XMLs (up to 5)
+    and parses them with edgartools. Returns net_shares / shares_outstanding, or None on
+    any failure (network unavailable, parse error, no filings in window).
+    """
+    if not shares_outstanding or shares_outstanding <= 0:
+        return None
+    cik10 = cik.zfill(10)
+    as_of_str = as_of_date.strftime("%Y-%m-%d")
+    cache_key = (cik10, as_of_str)
+    if cache_key in _FORM4_SIGNAL_CACHE:
+        return _FORM4_SIGNAL_CACHE[cache_key]
+
+    result: float | None = None
+    try:
+        window_start = (as_of_date - pd.DateOffset(months=6)).strftime("%Y-%m-%d")
+        # Fetch / reuse submissions JSON (one HTTP call per CIK per process lifetime)
+        if cik10 not in _SUBMISSIONS_CACHE:
+            resp = _requests.get(
+                f"https://data.sec.gov/submissions/CIK{cik10}.json",
+                headers={"User-Agent": _EDGAR_UA},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            _SUBMISSIONS_CACHE[cik10] = resp.json()
+        sub = _SUBMISSIONS_CACHE[cik10]
+        recent = sub.get("filings", {}).get("recent", {})
+        forms     = recent.get("form", [])
+        dates     = recent.get("filingDate", [])
+        accessions = recent.get("accessionNumber", [])
+        prim_docs  = recent.get("primaryDocument", [])
+        cik_int = str(int(cik10))
+
+        entries = [
+            (acc, pdoc)
+            for form, fdate, acc, pdoc in zip(forms, dates, accessions, prim_docs)
+            if form == "4" and window_start <= fdate <= as_of_str
+        ][:5]
+
+        if not entries:
+            result = None
+        else:
+            from edgar.ownership import Form4 as _Form4
+            net_shares = 0.0
+            found = False
+            for acc, pdoc in entries:
+                try:
+                    acc_clean = acc.replace("-", "")
+                    xml_url = (
+                        f"https://www.sec.gov/Archives/edgar/data/"
+                        f"{cik_int}/{acc_clean}/{pdoc}"
+                    )
+                    r2 = _requests.get(
+                        xml_url, headers={"User-Agent": _EDGAR_UA}, timeout=5
+                    )
+                    if r2.status_code != 200:
+                        continue
+                    f4 = _Form4.parse_xml(r2.text)
+                    buys = f4.common_stock_purchases
+                    if buys is not None and not buys.empty and "Shares" in buys.columns:
+                        net_shares += float(buys["Shares"].sum())
+                        found = True
+                    sells = f4.common_stock_sales
+                    if sells is not None and not sells.empty and "Shares" in sells.columns:
+                        net_shares -= float(sells["Shares"].sum())
+                        found = True
+                except Exception:
+                    continue
+            if found:
+                result = net_shares / shares_outstanding
+    except Exception:
+        log.debug("Form 4 signal failed for CIK %s at %s", cik, as_of_str, exc_info=True)
+        result = None
+
+    _FORM4_SIGNAL_CACHE[cache_key] = result
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -259,74 +333,61 @@ def _fetch_prices_parallel(tickers: list[str], start: str, end: str) -> pd.DataF
 
 
 # ---------------------------------------------------------------------------
-# Parallel monthly snapshot building
+# Filter funnel diagnostics
 # ---------------------------------------------------------------------------
 
 
-def _build_one_snapshot(
-    date: pd.Timestamp,
-    tickers: list[str],
-    edgar_dir: Path,
-    cik_map: dict[str, str],
-) -> tuple[pd.Timestamp, pd.DataFrame]:
-    """Build a point-in-time fundamentals snapshot for one monthly date."""
-    panel = fetch_financials(tickers, date, edgar_dir, cik_map)
+def _write_filter_funnel(
+    fund_by_date: dict[pd.Timestamp, pd.DataFrame],
+    config: CrucibleConfig,
+    output_path: Path,
+) -> None:
+    """Write per-snapshot filter funnel to CSV for diagnostic analysis.
 
-    # Pre-group by ticker to avoid O(n²) repeated DataFrame filtering
-    if not panel.empty:
-        panel_by_ticker: dict[str, pd.DataFrame] = {
-            t: g for t, g in panel.groupby("ticker")
-        }
-    else:
-        panel_by_ticker = {}
-
-    empty = pd.DataFrame(columns=["ticker", "fiscal_year", "metric", "value"])
-    rows = []
-    for ticker in tickers:
-        ticker_df = panel_by_ticker.get(ticker, empty)
-        pivoted = (
-            {
-                metric: grp.set_index("fiscal_year")["value"].sort_index()
-                for metric, grp in ticker_df.groupby("metric")
-            }
-            if not ticker_df.empty else {}
-        )
-        rows.append(_compute_snapshot_row(ticker, pivoted))
-
-    df = pd.DataFrame(rows).set_index("ticker")
-    n_ok = int((~df["insufficient_data"]).sum())
-    log.debug("%s  %d/%d tickers with sufficient data", date.date(), n_ok, len(tickers))
-    return date, df
-
-
-def _build_fundamentals_parallel(
-    tickers: list[str],
-    monthly_dates: pd.DatetimeIndex,
-    edgar_dir: Path,
-    cik_map: dict[str, str],
-) -> dict[pd.Timestamp, pd.DataFrame]:
-    """Build monthly fundamentals snapshots with 4 workers (memory-safe).
-
-    4 workers keep peak concurrent memory at ~4× per-snapshot overhead while the
-    300-entry LRU cache prevents simultaneous loading of all company JSONs.
+    Applies each filter sequentially so the counts reflect cumulative drop-off,
+    matching the live apply_filters() pipeline. Covers only the SP500 universe.
     """
-    result: dict[pd.Timestamp, pd.DataFrame] = {}
-    total = len(monthly_dates)
-    done = 0
+    th = config.filters
+    rows: list[dict] = []
 
-    with ThreadPoolExecutor(max_workers=SNAPSHOT_WORKERS) as pool:
-        futures = {
-            pool.submit(_build_one_snapshot, d, tickers, edgar_dir, cik_map): d
-            for d in monthly_dates
-        }
-        for future in as_completed(futures):
-            date, df = future.result()
-            result[date] = df
-            done += 1
-            if done % 12 == 0 or done == total:
-                log.info("Snapshots: %d / %d built", done, total)
+    for date in sorted(fund_by_date):
+        df = fund_by_date[date]
+        total = len(df)
+        n_insufficient = int(df["insufficient_data"].astype(bool).sum())
 
-    return result
+        usable = df[~df["insufficient_data"].astype(bool)]
+        n_roic_null = int(usable["roic_proxy_avg"].isna().sum())
+
+        after_roic   = filter_roic(usable, th.roic_min)
+        after_fcf    = filter_fcf_consistency(after_roic, th.fcf_positive_min_years)
+        after_debt   = filter_leverage(after_fcf, th.net_debt_ebitda_max)
+        after_growth = filter_revenue_growth(after_debt, th.revenue_growth_positive_min_years)
+        after_margin = filter_gross_margin_stability(after_growth)
+
+        rows.append({
+            "date":             date.date(),
+            "total_tickers":    total,
+            "insufficient_data": n_insufficient,
+            "roic_null":        n_roic_null,
+            "passed_roic":      len(after_roic),
+            "passed_fcf":       len(after_fcf),
+            "passed_debt":      len(after_debt),
+            "passed_growth":    len(after_growth),
+            "passed_margin":    len(after_margin),
+            "passed_all":       len(after_margin),
+        })
+
+        log.info(
+            "[funnel] %s  total=%d  insuff=%d  roic_null=%d  "
+            "→roic=%d →fcf=%d →debt=%d →growth=%d →margin=%d  passed=%d",
+            date.date(), total, n_insufficient, n_roic_null,
+            len(after_roic), len(after_fcf), len(after_debt),
+            len(after_growth), len(after_margin), len(after_margin),
+        )
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows).to_csv(output_path, index=False)
+    log.info("Filter funnel diagnostics → %s", output_path)
 
 
 # ---------------------------------------------------------------------------
@@ -404,6 +465,25 @@ def _generate_matrix_summary(
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Crucible walk-forward backtest matrix.")
+    parser.add_argument(
+        "--universe",
+        choices=MATRIX_UNIVERSES,
+        default=None,
+        help="Restrict to one universe (default: all).",
+    )
+    parser.add_argument(
+        "--holding",
+        type=int,
+        choices=MATRIX_HOLDING_MONTHS,
+        default=None,
+        help="Restrict to one holding period in months (default: all).",
+    )
+    args = parser.parse_args()
+
+    universes = [args.universe] if args.universe else MATRIX_UNIVERSES
+    holdings  = [args.holding]  if args.holding  else MATRIX_HOLDING_MONTHS
+
     if not CIK_MAP_PATH.exists():
         log.error(
             "CIK mapping not found at %s. Run scripts/download_edgar_bulk.py first.",
@@ -433,7 +513,7 @@ def main() -> None:
     config = CrucibleConfig(account_currency="USD")
 
     try:
-        for universe_id in MATRIX_UNIVERSES:
+        for universe_id in universes:
             log.info("=" * 60)
             log.info("Universe: %s", universe_id)
             log.info("=" * 60)
@@ -443,7 +523,7 @@ def main() -> None:
             if universe_id == "SP500":
                 tickers = fetch_sp500_tickers()
             else:
-                tickers = fetch_russell1000_tickers(IWB_URL)
+                tickers = fetch_russell1000_tickers()
             log.info("Universe: %d tickers", len(tickers))
 
             # ── Prices (fetched once, shared across all holding periods) ──────
@@ -462,13 +542,27 @@ def main() -> None:
                 "Building %d monthly snapshots from EDGAR (%d workers) …",
                 len(monthly_dates), SNAPSHOT_WORKERS,
             )
-            fund_by_date = _build_fundamentals_parallel(
-                tickers, monthly_dates, EDGAR_DIR, cik_map
+            fund_by_date = build_snapshots_parallel(
+                tickers=tickers,
+                dates=monthly_dates,
+                cik_map=cik_map,
+                edgar_dir=EDGAR_DIR,
+                prices=prices,
+                workers=SNAPSHOT_WORKERS,
             )
             log.info("Snapshots complete: %d dates", len(fund_by_date))
+            attach_momentum(fund_by_date, prices)
+            log.info("Momentum attached to all snapshots")
+
+            if universe_id == "SP500":
+                _write_filter_funnel(
+                    fund_by_date,
+                    config,
+                    DIAGNOSTICS_DIR / "filter_funnel.csv",
+                )
 
             # ── Run each holding period sequentially ──────────────────────────
-            for holding in MATRIX_HOLDING_MONTHS:
+            for holding in holdings:
                 combo = f"{universe_id}_{holding}m"
                 log.info("-" * 50)
                 log.info("Combination: %s", combo)
