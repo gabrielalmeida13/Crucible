@@ -91,15 +91,7 @@ from crucible.filters import (
     filter_revenue_growth,
     filter_roic,
 )
-from crucible.snapshot import (
-    build_snapshots_parallel,
-    compute_snapshot_row as _compute_snapshot_row,
-    get_metric as _get_metric,
-    get_raw_pivoted as _get_raw_pivoted,
-    linear_slope as _linear_slope,
-    load_raw_annual_facts as _load_raw_annual_facts,
-    prices_at as _prices_at,
-)
+from crucible.snapshot import build_snapshots_parallel
 
 # ---------------------------------------------------------------------------
 # Matrix configuration
