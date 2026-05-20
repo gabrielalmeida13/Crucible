@@ -1,0 +1,177 @@
+# crucible/tracks/track2_growth.py
+"""Track 2 — Growth Inflection.
+
+Filter stack targets companies with accelerating revenue, expanding margins,
+and positive price momentum.  ROIC > 15% is NOT required — a lower-ROIC
+company accelerating toward quality may be early-stage compounder material.
+
+Scorer weights: growth_quality=50%, momentum=30%, valuation=20%.
+"""
+from __future__ import annotations
+
+import logging
+
+import pandas as pd
+
+from crucible.config import CrucibleConfig, Track2FilterThresholds, Track2ScoreWeights
+from crucible.fx import apply_fx_penalty
+from crucible.scorer import _derive_accounting_region, _peer_rank
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Layer 1 — Filter functions
+# ---------------------------------------------------------------------------
+
+
+def filter_revenue_growth_10pct(
+    df: pd.DataFrame,
+    min_pct: float = 0.10,
+) -> pd.DataFrame:
+    """Keep tickers where both revenue_growth_yr1 and revenue_growth_yr2 > min_pct."""
+    mask = (
+        df["revenue_growth_yr1"].notna()
+        & (df["revenue_growth_yr1"] > min_pct)
+        & df["revenue_growth_yr2"].notna()
+        & (df["revenue_growth_yr2"] > min_pct)
+    )
+    return df[mask]
+
+
+def filter_revenue_acceleration(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep tickers where revenue_acceleration > 0 (YoY growth rate is increasing)."""
+    mask = df["revenue_acceleration"].notna() & (df["revenue_acceleration"] > 0)
+    return df[mask]
+
+
+def filter_gross_margin_growth(
+    df: pd.DataFrame,
+    min_margin: float = 0.30,
+) -> pd.DataFrame:
+    """Keep tickers where gross_margin_latest >= min_margin OR gross_margin_yr1_change > 0."""
+    high_margin = df["gross_margin_latest"].notna() & (df["gross_margin_latest"] >= min_margin)
+    expanding   = df["gross_margin_yr1_change"].notna() & (df["gross_margin_yr1_change"] > 0)
+    return df[high_margin | expanding]
+
+
+def filter_fcf_positive_last2yr(
+    df: pd.DataFrame,
+    min_years: int = 1,
+) -> pd.DataFrame:
+    """Keep tickers with FCF positive in at least min_years of the last 2 years."""
+    mask = (
+        df["fcf_positive_last2yr"].notna()
+        & (df["fcf_positive_last2yr"] >= min_years)
+    )
+    return df[mask]
+
+
+def filter_leverage(
+    df: pd.DataFrame,
+    max_ratio: float = 5.0,
+) -> pd.DataFrame:
+    """Keep tickers where Net Debt / EBITDA < max_ratio (relaxed vs Track 1's 3.0)."""
+    mask = df["net_debt_ebitda"].notna() & (df["net_debt_ebitda"] < max_ratio)
+    return df[mask]
+
+
+def apply_filters(
+    df: pd.DataFrame,
+    thresholds: Track2FilterThresholds,
+) -> pd.DataFrame:
+    """Apply all Track 2 Layer 1 filters in sequence.
+
+    Note: momentum filter (momentum > 0) is NOT applied here — it is enforced
+    in run_monthly.py after prices are attached.
+    """
+    usable = df[~df["insufficient_data"].astype(bool)].copy()
+    logger.info(
+        "track2 apply_filters start: %d total, %d with sufficient data",
+        len(df), len(usable),
+    )
+
+    pipeline = [
+        ("rev_growth_10pct",  lambda d: filter_revenue_growth_10pct(d, thresholds.revenue_growth_min_pct)),
+        ("rev_acceleration",  lambda d: filter_revenue_acceleration(d)),
+        ("gross_margin",      lambda d: filter_gross_margin_growth(d, thresholds.gross_margin_min)),
+        ("fcf_last2yr",       lambda d: filter_fcf_positive_last2yr(d, thresholds.fcf_positive_last2yr_min)),
+        ("leverage",          lambda d: filter_leverage(d, thresholds.net_debt_ebitda_max)),
+    ]
+
+    result = usable
+    for name, fn in pipeline:
+        before = len(result)
+        result = fn(result)
+        logger.info("  %-22s %3d → %3d", name, before, len(result))
+
+    logger.info("track2 apply_filters end: %d companies pass all filters", len(result))
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Layer 2 — Scorer
+# ---------------------------------------------------------------------------
+
+
+def score(
+    df: pd.DataFrame,
+    config: CrucibleConfig,
+    weights: Track2ScoreWeights,
+) -> pd.DataFrame:
+    """Compute growth_quality, momentum, valuation, and composite scores.
+
+    growth_quality (50%): equal-weight rank of revenue_acceleration,
+        operating_margin_trend, fcf_trajectory.
+    momentum (30%): average rank of momentum_raw (12-1m) and momentum_3m.
+    valuation (20%): p_s rank vs sector median; falls back to p_fcf per-ticker.
+    """
+    df = df.copy()
+    accounting_region = _derive_accounting_region(df)
+    peer_group = df["sector"].fillna("Unknown") + "|" + accounting_region
+
+    # --- growth quality (3 sub-components, equal weight 1/3 each) ---
+    gq_rev  = _peer_rank(df, "revenue_acceleration",   peer_group, ascending=True,  fill_nan=0.0)
+    gq_om   = _peer_rank(df, "operating_margin_trend", peer_group, ascending=True,  fill_nan=0.0)
+    gq_fcf  = _peer_rank(df, "fcf_trajectory",         peer_group, ascending=True,  fill_nan=0.0)
+    df["growth_quality_score"] = (gq_rev + gq_om + gq_fcf) / 3.0
+
+    # --- momentum (average of 12-1m and 3m ranks) ---
+    mom_raw = _peer_rank(df, "momentum_raw", peer_group, ascending=True, fill_nan=0.5)
+    mom_3m  = _peer_rank(df, "momentum_3m",  peer_group, ascending=True, fill_nan=0.5)
+    df["momentum_score"] = (mom_raw + mom_3m) / 2.0
+
+    # --- valuation: p_s primary, p_fcf fallback per-ticker ---
+    vr_p_s   = _peer_rank(df, "p_s",   peer_group, ascending=False, fill_nan=float("nan"))
+    vr_p_fcf = _peer_rank(df, "p_fcf", peer_group, ascending=False, fill_nan=0.0)
+    df["valuation_score"] = vr_p_s.where(vr_p_s.notna(), vr_p_fcf)
+
+    # FX penalty (same as Track 1)
+    df = apply_fx_penalty(df, config.account_currency, config.fx.conversion_penalty)
+
+    df["composite_score"] = (
+        weights.growth_quality * df["growth_quality_score"]
+        + weights.momentum     * df["momentum_score"]
+        + weights.valuation    * df["valuation_score"]
+        + df["fx_penalty"]
+    )
+
+    logger.info(
+        "track2 scored %d companies; top=%.3f  bottom=%.3f",
+        len(df),
+        df["composite_score"].max() if len(df) else float("nan"),
+        df["composite_score"].min() if len(df) else float("nan"),
+    )
+    return df.sort_values("composite_score", ascending=False)
+
+
+def run(
+    df: pd.DataFrame,
+    config: CrucibleConfig,
+    weights: Track2ScoreWeights | None = None,
+) -> pd.DataFrame:
+    """Apply Track 2 filters then scorer; return sorted by composite_score."""
+    if weights is None:
+        weights = config.track2_score_weights
+    filtered = apply_filters(df, config.track2_filters)
+    return score(filtered, config, weights)
