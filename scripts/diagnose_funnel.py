@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / ".env")
 
-from crucible.config import CrucibleConfig, FilterThresholds
+from crucible.config import CrucibleConfig, FilterThresholds, Track2FilterThresholds
 from crucible.fetcher import (
     _load_cik_mapping,
     fetch_russell1000_tickers,
@@ -43,6 +43,13 @@ from crucible.filters import (
     filter_roic,
 )
 from crucible.snapshot import build_snapshots_parallel
+from crucible.tracks.track2_growth import (
+    filter_fcf_positive_last2yr,
+    filter_gross_margin_growth,
+    filter_leverage as filter_leverage_t2,
+    filter_revenue_acceleration,
+    filter_revenue_growth_10pct,
+)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -103,6 +110,37 @@ def _compute_funnel(
             "passed_growth":     len(after_growth),
             "passed_margin":     len(after_margin),
             "passed_all":        len(after_margin),
+        })
+    return rows
+
+
+def _compute_funnel_track2(
+    fund_by_date: dict[pd.Timestamp, pd.DataFrame],
+    thresholds: Track2FilterThresholds,
+) -> list[dict]:
+    rows: list[dict] = []
+    for date in sorted(fund_by_date):
+        df = fund_by_date[date]
+        total    = len(df)
+        n_insuff = int(df["insufficient_data"].astype(bool).sum())
+        usable   = df[~df["insufficient_data"].astype(bool)]
+
+        after_growth  = filter_revenue_growth_10pct(usable, thresholds.revenue_growth_min_pct)
+        after_accel   = filter_revenue_acceleration(after_growth)
+        after_margin  = filter_gross_margin_growth(after_accel, thresholds.gross_margin_min)
+        after_fcf     = filter_fcf_positive_last2yr(after_margin, thresholds.fcf_positive_last2yr_min)
+        after_debt    = filter_leverage_t2(after_fcf, thresholds.net_debt_ebitda_max)
+
+        rows.append({
+            "date":              date.date(),
+            "total_tickers":     total,
+            "insufficient_data": n_insuff,
+            "passed_rev_growth": len(after_growth),
+            "passed_rev_accel":  len(after_accel),
+            "passed_margin":     len(after_margin),
+            "passed_fcf":        len(after_fcf),
+            "passed_leverage":   len(after_debt),
+            "passed_all":        len(after_debt),
         })
     return rows
 
@@ -185,6 +223,75 @@ def _print_table(rows: list[dict], thresholds: FilterThresholds, universe: str =
     print()
 
 
+def _print_table_track2(
+    rows: list[dict],
+    thresholds: Track2FilterThresholds,
+    universe: str,
+) -> None:
+    cols = [
+        ("date",        "date",              10),
+        ("total",       "total_tickers",      6),
+        ("insuff",      "insufficient_data",  6),
+        ("→rev>10%",    "passed_rev_growth",  8),
+        ("→accel",      "passed_rev_accel",   6),
+        ("→margin",     "passed_margin",      7),
+        ("→fcf2yr",     "passed_fcf",         7),
+        ("→lever",      "passed_leverage",    6),
+        ("passed",      "passed_all",         6),
+    ]
+
+    print()
+    print(f"Track 2 Filter Funnel — {universe}, annual snapshots Jan 2010–2021")
+    print(
+        f"Thresholds: Rev growth > {thresholds.revenue_growth_min_pct:.0%} (both years)  |  "
+        f"Rev acceleration > 0  |  "
+        f"Gross margin ≥ {thresholds.gross_margin_min:.0%} OR expanding  |  "
+        f"FCF positive ≥ {thresholds.fcf_positive_last2yr_min} of 2 yrs  |  "
+        f"Net Debt/EBITDA < {thresholds.net_debt_ebitda_max:.1f}"
+    )
+    print("NOTE: Momentum filter (price momentum > 0) excluded — no prices in diagnostic.")
+    print()
+
+    header = "  ".join(f"{label:>{width}}" for label, _, width in cols)
+    sep    = "  ".join("-" * width for _, _, width in cols)
+    print(header)
+    print(sep)
+
+    for row in rows:
+        line = "  ".join(f"{str(row[key]):>{width}}" for _, key, width in cols)
+        print(line)
+
+    print(sep)
+    avg_row = {
+        "date": "AVG",
+        **{key: round(sum(r[key] for r in rows) / len(rows)) for _, key, _ in cols[1:]},
+    }
+    print("  ".join(f"{str(avg_row[key]):>{width}}" for _, key, width in cols))
+    print()
+
+    avg_total  = avg_row["total_tickers"]
+    avg_insuff = avg_row["insufficient_data"]
+    avg_usable = avg_total - avg_insuff
+    avg_passed = avg_row["passed_all"]
+    pct = lambda n, d: f"{n/d:.0%}" if d else "n/a"
+
+    print("Diagnosis (Track 2 — Growth Inflection)")
+    print(f"  Average universe size:               {avg_total}")
+    print(f"  Insufficient data (< 3 yrs):         {avg_insuff}  ({pct(avg_insuff, avg_total)} of total)")
+    print(f"  Pass rev growth > 10% (both years):  {avg_row['passed_rev_growth']}  ({pct(avg_row['passed_rev_growth'], avg_usable)} of usable)")
+    print(f"  Pass revenue acceleration:           {avg_row['passed_rev_accel']}  ({pct(avg_row['passed_rev_accel'], avg_usable)} of usable)")
+    print(f"  Pass gross margin filter:            {avg_row['passed_margin']}  ({pct(avg_row['passed_margin'], avg_usable)} of usable)")
+    print(f"  Pass FCF positive ≥ 1 of 2 yrs:     {avg_row['passed_fcf']}  ({pct(avg_row['passed_fcf'], avg_usable)} of usable)")
+    print(f"  Pass leverage < 5x:                  {avg_row['passed_leverage']}  ({pct(avg_row['passed_leverage'], avg_usable)} of usable)")
+    print(f"  Pass ALL 5 filters:                  {avg_passed}  ({pct(avg_passed, avg_usable)} of usable)")
+    print()
+    print("  Momentum filter excluded from this diagnostic — live runs will cut further.")
+    print()
+    output_path = ROOT / "data" / "diagnostics" / f"filter_funnel_track2_{universe.lower()}.csv"
+    print(f"  CSV written to: {output_path}")
+    print()
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -198,8 +305,15 @@ def main() -> None:
         default="SP500",
         help="Universe to analyse (default: SP500)",
     )
+    parser.add_argument(
+        "--track",
+        choices=["1", "2"],
+        default="1",
+        help="Filter stack to use: 1=Quality (default), 2=Growth Inflection",
+    )
     args = parser.parse_args()
     universe: str = args.universe
+    track: str = args.track
 
     for path, label in (
         (CIK_MAP_PATH, "CIK mapping"),
@@ -238,15 +352,23 @@ def main() -> None:
     )
 
     log.info("Computing filter funnel …")
-    rows = _compute_funnel(fund_by_date, config.filters)
 
-    output_path = ROOT / "data" / "diagnostics" / f"filter_funnel_{universe.lower()}.csv"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(rows).to_csv(output_path, index=False)
-    log.info("CSV written → %s", output_path)
-
-    _print_table(rows, config.filters, universe)
-    _print_column_coverage(fund_by_date)
+    if track == "2":
+        t2_thresholds = Track2FilterThresholds()
+        rows = _compute_funnel_track2(fund_by_date, t2_thresholds)
+        output_path = ROOT / "data" / "diagnostics" / f"filter_funnel_track2_{universe.lower()}.csv"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(rows).to_csv(output_path, index=False)
+        log.info("CSV written → %s", output_path)
+        _print_table_track2(rows, t2_thresholds, universe)
+    else:
+        rows = _compute_funnel(fund_by_date, config.filters)
+        output_path = ROOT / "data" / "diagnostics" / f"filter_funnel_{universe.lower()}.csv"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(rows).to_csv(output_path, index=False)
+        log.info("CSV written → %s", output_path)
+        _print_table(rows, config.filters, universe)
+        _print_column_coverage(fund_by_date)
 
 
 def _print_column_coverage(fund_by_date: dict[pd.Timestamp, pd.DataFrame]) -> None:
