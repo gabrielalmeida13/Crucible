@@ -1,6 +1,6 @@
 # Crucible — ROADMAP.md
 
-> Current status: **Phase 4 complete — prospective validation active from June 2026**
+> Current status: **Phase 4 complete — Phase 5 in progress (ML experimental + Options)**
 > Update the status line above every time the phase changes.
 
 ---
@@ -10,170 +10,202 @@
 ```
 Phase 0 → Phase 1 → Phase 2 → Phase 2.5 → Phase 3 → Phase 4 → Phase 5
 Setup     Pipeline   Backtest   Scorer      3-Track   Operational  ML v2 +
-          + Filters  + EDGAR    complete    System    + Portfolio   Expansion
+          + Filters  + EDGAR    complete    System    ✓ complete   Options
 
-  ✓ done    ✓ done    ✓ done    ✓ done      ✓ done    ✓ done      ← next
+  ✓ done    ✓ done    ✓ done    ✓ done      ✓ done    ✓ done      ← here
 ```
+
+---
+
+## Phase 4 completion summary — May 2026 ✓
+
+Everything built and operational:
+
+- `crucible/portfolio.py` — HOLD / REINFORCE / REVIEW / EXIT_SIGNAL / DATA_MISSING
+- `crucible/regime.py` — GROWTH / DEFENSIVE / HIGH_VOL regime detection
+- `crucible/alerts.py` — Telegram + email alerts for portfolio changes
+- `crucible/store.py` — SQLite prospective logging
+- `crucible/tracks/track1_quality.py` — Quality Compounders
+- `crucible/tracks/track2_growth.py` — Growth Inflection (primary engine)
+- `crucible/tracks/track3_value.py` — Value Recovery
+- `scripts/run_monthly.py` — three tracks, portfolio review, allocation advice, alerts
+- `scripts/run_combined_backtest.py` — Protocol A and B rotation simulation
+- `scripts/check_alerts.py` — lightweight daily cron
+- `app/dashboard.py` — Monthly Picks, Portfolio, Manual Import, History, Performance tabs
+- Phase 4.7 features: asset_growth_yoy, deferred_revenue_growth, eps_surprise_last_q
 
 ---
 
 ## System state — May 2026
 
-### Validated decisions (do not reopen without new evidence)
+### Validated decisions (frozen for prospective protocol)
 
 **Universe:** SP500 (503 tickers) for all three tracks.
-Russell 1000 was tested and rejected — mid-caps dilute quality in Track 1
-and reduce Sharpe in Tracks 2 and 3 despite more candidates per month.
-
-**Holding period:** 1 month for all tracks.
-
-**Rotation:** deterministic (Track 1 → Track 2 → Track 3 → repeat) or
-weighted based on regime (see Phase 4.6). Given investor profile (20 years
-old, high risk tolerance), Track 2 is the primary engine.
-
-**ML (Phase 3a):** Random Forest at 57.9% validation accuracy was not
-deployed. The model improved in-sample but degraded in held-out. Root cause:
-validation set was iterated too many times. ML is not discarded — retested
-in Phase 5 with more prospective data and fresh held-out.
+**Holding period:** 1 month.
+**Primary engine:** Track 2 (Growth Inflection) — beats benchmark in held-out.
+**Rotation protocol:** Protocol B (50% T2 / 30% T3 / 20% T1) beats Track 2 alone
+on Sharpe and drawdown but sacrifices 11% return in current regime.
+Given high risk tolerance: Track 2 pure for monthly picks.
 
 ### Backtest results (2013–2024, SP500)
 
-| Track | Total return | Excess vs SP500 | Sharpe | Hit rate | Unique tickers |
-|-------|-------------|-----------------|--------|----------|----------------|
-| 1 — Quality | 361.03% | +101.88% | 0.79 | 70.36% | 42 |
-| 2 — Growth | 420.95% | +161.80% | 0.72 | 68.81% | 62 |
-| 3 — Value | 298.94% | +39.80% | 0.61 | 73.48% | 116 |
-| SP500 benchmark | 259.15% | — | — | — | — |
+| Track | Total return | Excess vs SP500 | Sharpe | Hit rate |
+|-------|-------------|-----------------|--------|----------|
+| 1 — Quality | 361.03% | +101.88% | 0.79 | 70.36% |
+| 2 — Growth | 420.95% | +161.80% | 0.72 | 68.81% |
+| 3 — Value | 298.94% | +39.80% | 0.61 | 73.48% |
+| Protocol B blend | 433.90% | +174.75% | 0.82 | — |
+| SP500 benchmark | 259.15% | — | — | — |
 
-### Held-out results (2025-01 to 2026-05, SP500, ~16 months)
+### Held-out results (2025-01 to 2026-05, SP500)
 
-| Track | Total return | Excess vs SP500 | Sharpe | Hit rate | Max drawdown |
-|-------|-------------|-----------------|--------|----------|--------------|
+| Track | Total return | Excess | Sharpe | Hit rate | Max DD |
+|-------|-------------|--------|--------|----------|--------|
 | 1 — Quality | 8.48% | -17.22% | 0.25 | 59.00% | -7.43% |
 | 2 — Growth | 40.17% | +14.48% | 1.11 | 50.82% | -6.79% |
 | 3 — Value | 19.44% | -6.25% | 0.80 | 67.06% | -7.72% |
+| Protocol B | 28.94% | +2.70% | 1.16 | 57.65% | -4.64% |
 | SP500 benchmark | 25.69% | — | — | — | — |
 
-**Interpretation:** Track 2 is the only track beating the benchmark in the
-held-out. The 2025-2026 regime continues to favour growth over quality and
-value — structurally consistent with training period. Track 1 and Track 3
-are not broken; they are regime-dependent and will recover in rotations.
+### Real portfolio (from May 2026)
 
-### First real pick — May 2026
-**APH (Amphenol Corporation)** — Track 2, Growth Inflection.
-Entry rationale: 58% revenue growth YoY Q1 2026, record orders (book-to-bill
-1.24x), 27.3% adjusted operating margin, AI data center pick-and-shovel play,
-P/E forward ~26 vs sector — reasonable for the growth profile.
-Entry P/FCF: 77.733 | Entry P/S: 7.845
+| Ticker | Track | Entry date | Entry price | Entry P/FCF | Entry P/S |
+|--------|-------|-----------|-------------|-------------|-----------|
+| APH | 2 | 2026-05-27 | (fill after execution) | 77.733 | 7.845 |
+| NVDA | 2 | (historical) | (fill) | — | — |
+| INTC | 2 | (historical) | (fill) | — | — |
 
 ---
 
-## Prospective validation protocol (MANDATORY from June 2026)
+## Prospective validation protocol (MANDATORY — June 2026 onwards)
 
-The system is frozen as of June 2026. No parameter changes permitted.
+**System frozen as of June 2026. No production parameter changes permitted.**
 
-- Every monthly run produces a timestamped output in `data/monthly/{YYYY-MM}/`
-- All picks are logged to SQLite — never overwritten
-- Results reviewed May 2027 against actual prices
-- If a bug is found: document, fix, rerun — but do not look at new results
-  before the fix is applied
-- Any parameter change after June 2026 restarts the prospective clock
+- Monthly run on 1st of each month — `run_monthly.py --track 2 --budget 100`
+- All picks logged to SQLite — never overwritten
+- Results reviewed May 2027 vs actual prices
+- Bug fixes: document, fix, rerun without looking at results first
+- Any production parameter change restarts the prospective clock
 
----
-
-## Phase 4 — Operational system ✓ complete
-
-### Phase 4 completion summary — May 2026
-
-Everything below was built, tested, and is running in production as of May 2026.
-The system is frozen for prospective validation from June 2026.
-
-**Core operational pipeline**
-- [x] `crucible/portfolio.py` — position evaluator: HOLD / REINFORCE / REVIEW / EXIT_SIGNAL / DATA_MISSING
-- [x] `scripts/run_monthly.py` — unified entry point for all three tracks with portfolio review and allocation advice
-- [x] SQLite prospective logging (`data/crucible_picks.db`) with atomic JSON manifest per run
-
-**Three-track screener (4.1–4.4)**
-- [x] `crucible/tracks/track1_quality.py` — Quality Compounder: ROIC, FCF consistency, debt, margin stability
-- [x] `crucible/tracks/track2_growth.py` — Growth Inflection: revenue acceleration, margin expansion, momentum gate
-- [x] `crucible/tracks/track3_value.py` — Value Recovery: P/FCF vs history, balance sheet health, recovery signals
-- [x] Track 2 earnings quality signals: `asset_growth_yoy`, `deferred_revenue_growth`, `eps_surprise_last_q` (4.7)
-
-**Regime detection (4.6)**
-- [x] `crucible/regime.py` — three-state rules-based regime (GROWTH / DEFENSIVE / HIGH_VOL)
-  using VIX, 10y–2y yield curve spread, and SP500 12-month momentum (all free via yfinance)
-- [x] Regime allocation hint integrated into `run_monthly.py` CLI output
-
-**Alerts (4.5)**
-- [x] `crucible/alerts.py` — EXIT_SIGNAL transitions, consecutive negative momentum (2+ months),
-  HOLD→REVIEW downgrades; Telegram (preferred) and email (fallback) channels
-- [x] `scripts/check_alerts.py` — lightweight SQLite-only daily cron script (no EDGAR needed)
-- [x] Monthly reminder on the 1st of each month if screener not yet run
-- [x] Alert dispatch integrated into `scripts/run_monthly.py` (step 12a–12c)
-
-**Dashboard (4.8)**
-- [x] Streamlit dashboard — Monthly Picks, Portfolio, Manual Import (XLSX+CSV), History, Performance
-- [x] Regime indicator widget on Monthly Picks tab: coloured badge + VIX / spread / SP500 momentum
-- [x] Allocation advice in Portfolio tab: budget widget, calls `allocation_advice()`, renders as Markdown
-- [x] Performance tab: prospective picks since June 2026, return_pct coloured green/red,
-  SP500 benchmark comparison, per-track breakdown
-- [x] Manual Import tab replaces XTB API (discontinued March 2025)
+The ML experimental branch and options module are SEPARATE from the
+production system — they do not affect prospective logging or validation.
 
 ---
 
-## Phase 5 — ML v2 + Expansion
+## Phase 5 — Parallel workstreams (active now)
 
-> Do not start until Phase 4.5-4.7 are complete AND at least 6 months of
-> prospective data exist (December 2026 earliest).
+### 5.0 — ML experimental: LightGBM LambdaMART (start now, validate December)
 
-### 5.1 — ML for Track 2 (learning-to-rank within shortlist)
+**Why now, not December:** Development and historical backtesting can happen
+immediately. The December gate is for production deployment, which requires
+6 months of prospective data to validate on truly clean data. Build now,
+validate in December.
 
-Previous approach (Phase 3a) tried to classify outperformers across all 500 stocks.
-New approach: rank companies within the already-filtered Track 2 shortlist.
-This is a narrower, more tractable problem with cleaner signal.
+**The key difference from Phase 3a (which failed):**
+- Phase 3a: classify 500 companies as outperform/underperform (hard problem)
+- Phase 5.0: rank 9-22 companies within the Track 2 shortlist (simpler problem,
+  more signal per observation, less noise)
 
-- [ ] Training window: 2013–2025 (includes more regime diversity than before)
-- [ ] Held-out: prospective data from June 2026 onwards (truly clean)
-- [ ] Target: rank within Track 2 shortlist by 3-month forward return
-- [ ] Features: all Track 2 scorer components + momentum_3m + insider_buy_ratio
-      + eps_surprise_last_q + deferred_revenue_growth (new from Phase 4.7)
-- [ ] Model: LightGBM LambdaMART (learning-to-rank, not binary classification)
-- [ ] Exit criterion: model improves hit rate by ≥ 3pp vs score-based ranking
-      on prospective held-out — not on backtested data
+**Implementation:**
+- [x] Create `crucible/ml/ranker.py` with LightGBM LambdaMART (`lambdarank` objective)
+- [x] Training data: monthly Track 2 shortlists (9–22 companies), 3m forward
+      return → quintile labels 0–4 (within-group percentile rank)
+- [x] Features: 13 features (all Track 2 scorer components + raw metrics +
+      Phase 4.7 signals; 4.7 features absent from pre-2026 cache → imputed)
+- [x] Walk-forward: train 2013-2021 (20% internal val for early stopping),
+      validate 2022-2024; metrics: NDCG@5 + hit-rate improvement
+- [x] `scripts/run_phase50_ranker.py` — execution script; saves
+      `data/results/phase50_ranker_validation.md` and
+      `data/models/phase50_ranker.pkl`
+- [ ] Run validation script (requires prices download ~15-30 min)
+- [ ] December 2026: run held-out on prospective data 2026-06 to 2026-12
+- [ ] Exit criterion: model ranking improves hit rate by ≥ 3pp vs score-based
+      on prospective held-out. If not met, document and do not deploy.
 
-### 5.2 — EPS revisions signal (requires external data)
+### 5.1 — Options module (start now — XTB has options in Portugal)
 
-Academic research (MSCI, Robeco) consistently identifies analyst EPS revision
-direction as one of the strongest alpha signals. Not currently implementable
-for free — requires a data provider with consensus estimates.
+**Context:** XTB launched American-style options on 110 US stocks in Portugal
+in May 2026 (buy-only: calls and puts). Max expiry ~231 days. Standard
+contracts of 100 shares.
 
-Options to evaluate at Phase 5 start:
-- Alpha Vantage (limited free tier, paid for full coverage)
-- Quandl/Nasdaq Data Link (academic pricing available)
-- Evaluate cost vs. signal strength with 6+ months of prospective data first
+**Practical capital constraint:** Options on high-price stocks (APH $137,
+AMD $110+, FIX $350+) require $500-1500 minimum premium per contract.
+With €100/month budget, options are not viable for monthly picks.
+Viable uses with current capital:
 
-- [ ] Evaluate data source cost and coverage
-- [ ] If viable: add `eps_revision_direction` (up/flat/down over last 30 days)
-      as a binary modifier to Track 2 composite score
+1. **Protective puts on large winners** — INTC (+500%) is the primary candidate.
+   A put at current price costs ~$200-400 for 6 months, protecting accumulated
+   gains without selling and triggering tax.
 
-### 5.3 — Universe expansion to Europe
+2. **Leveraged calls when conviction is high** — accumulate 5-15 months of
+   budget (~€500-1500) before buying a call on a Track 2 pick instead of shares.
+   Deep ITM calls (delta ~0.8) give similar exposure to 100 shares for less capital.
 
-> EDGAR covers US only. European data requires SimFin (free, limited) or
-> FMP paid (~$20/month). Evaluate budget at Phase 5 start.
+3. **Index options** — SPY/QQQ options have lower nominal prices per contract
+   and can be used to hedge the overall portfolio direction.
 
-- [ ] Add `EUROPE_LARGE` universe (LSE, Deutsche Börse, Euronext Paris)
-- [ ] Enable IFRS normalisation in scorer
-- [ ] Calibrate thresholds per region
-- [ ] Add FX cost penalty in `fx.py` (XTB charges 0.5% conversion)
-- [ ] Full backtest before production use
+**Implementation:**
+- [ ] Create `crucible/options.py` with `suggest_options_strategy(ticker, position,
+      budget, prices, expiry_days=231)` — given a ticker and context (new pick,
+      existing winner, protective hedge), outputs: recommended strategy, estimated
+      premium, breakeven price, max loss, payoff diagram data
+- [ ] Use `yf.Ticker(ticker).option_chain(date)` for real option chain data
+- [ ] Add Options tab to dashboard: given a ticker from the shortlist or portfolio,
+      shows available strikes/expiries with payoff comparison (buy shares vs buy call)
+- [ ] Integrate with portfolio module: for positions with return > 100% and
+      market_value > €500, flag "consider protective put" in allocation advice
 
-### 5.4 — Options/hedging (research only)
+**Learning path (before building the module):**
+- Understand delta, theta, implied volatility — these determine option pricing
+- Key insight for Track 2: growth companies have high IV (expensive options)
+  because the market prices in uncertainty. This works against buying calls.
+  Low IV = cheaper options = better risk/reward for long calls.
+- For APH specifically: check IV rank before buying any call. If IV > 50th
+  percentile of its own history, options are expensive — buy shares instead.
 
-> Not for real capital until validated over ≥ 12 months prospectively.
+### 5.2 — Regime-adjusted scoring (low effort, real impact)
 
-- Protective puts on Track 2 positions with large unrealised gains (>100%)
-- Covered calls on Track 1 positions for income generation
-- Track 4 (Short candidates): inverse of Track 1 filters as put targets
+The regime module (`crucible/regime.py`) already detects GROWTH/DEFENSIVE/HIGH_VOL.
+Currently it only shows a badge in the dashboard. The next step is using it
+to dynamically adjust scorer weights — already proven to improve Sharpe in
+combined backtest research.
+
+- [ ] In HIGH_VOL regime: momentum weight -5pp, quality weight +5pp
+- [ ] In DEFENSIVE regime: Track 1 gets priority in allocation advice
+- [ ] Backtest on training period to confirm improvement before deploying
+- [ ] No held-out test needed — this is a scorer improvement, not a new model
+
+### 5.3 — EPS revisions (requires paid data — evaluate at Phase 5 mid-point)
+
+Analyst EPS revision direction is one of the strongest documented alpha signals
+(Robeco research: 158% IR improvement when combined with fundamentals). Not
+currently implementable for free.
+
+Options at Phase 5 mid-point (November 2026):
+- Alpha Vantage (limited free tier)
+- Quandl/Nasdaq Data Link (academic pricing)
+- Evaluate cost vs expected signal strength with 6 months of prospective data
+
+### 5.4 — Universe expansion to Europe (Phase 5 end)
+
+> EDGAR covers US only. European data requires SimFin or FMP paid.
+> Evaluate budget at Phase 5 end (May 2027).
+
+---
+
+## Monthly workflow (production — June 2026 onwards)
+
+```
+Day 1 of each month:
+1. python scripts/run_monthly.py --track 2 --budget 100
+2. Open dashboard → analyse shortlist
+3. Export track2_picks.md → debate top 3 with AI assistant
+4. Execute purchase on XTB
+5. Register in dashboard (ticker, price, track, shares, P/FCF, P/S)
+6. python scripts/check_alerts.py → confirm no alerts pending
+
+Results reviewed: May 2027 (12 months prospective)
+```
 
 ---
 
@@ -184,19 +216,20 @@ Options to evaluate at Phase 5 start:
 **Sector normalisation:** all metrics compared within GICS sector peer groups.
 
 **The model is a tool, not an oracle:** monthly output is a starting point
-for human investigation, not a buy instruction. Debate top candidates with
-an AI assistant using the full reasoning export before deciding.
+for human investigation, not a buy instruction. Debate top candidates
+with an AI assistant before deciding.
 
 **Prospective validation is the only clean validation:** the June 2026
-prospective clock is the definitive test. Any modification after June 2026
-restarts the clock.
+prospective clock is the definitive test. Production system is frozen.
+Experimental branches (ML, options) are separate and do not affect it.
 
 **Crucible is a living project:** refined continuously as prospective data
-accumulates, regimes change, and new sources become available. Every major
-parameter change requires a new held-out before deployment.
+accumulates and new data sources become available. Every production change
+requires a new held-out validation before deployment.
 
 **Investor profile:** age 20, high risk tolerance, long time horizon.
-Track 2 (Growth Inflection) is the primary engine. Track 1 and Track 3
-provide diversification and drawdown protection. Monthly investment: ~€100.
-Strategy: build individual positions methodically over years, parallel to
-core ETF allocation (S&P 500, QVDE).
+Track 2 (Growth Inflection) is the primary engine. Monthly investment:
+~€100 in stocks + occasional options when capital accumulates or for
+protective hedging of large existing gains (INTC +500%).
+Base portfolio: S&P 500 ETF + QVDE ETF as core, individual picks as
+satellite positions built methodically over years.
