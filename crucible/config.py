@@ -41,7 +41,8 @@ class ScoreWeights:
 class Track2FilterThresholds:
     """Layer 1 hard-rule thresholds for Track 2 (Growth Inflection)."""
 
-    revenue_growth_min_pct: float = 0.08
+    revenue_growth_min_pct: float = 0.08       # annual yr1 fallback when quarterly unavailable
+    revenue_growth_qyoy_min_pct: float = 0.06  # quarterly YoY threshold (Phase 5)
     gross_margin_min: float = 0.30
     fcf_positive_last2yr_min: int = 1
     net_debt_ebitda_soft_max: float = 8.0

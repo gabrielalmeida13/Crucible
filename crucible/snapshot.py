@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from pathlib import Path
@@ -126,6 +127,160 @@ def load_raw_annual_facts(
         if collected:
             result[tag] = collected
     return result
+
+
+@lru_cache(maxsize=600)
+def load_raw_quarterly_facts(
+    padded_cik: str,
+    edgar_dir_str: str,
+) -> dict[str, list[dict]]:
+    """Load all 10-Q/10-Q/A records for a CIK, keyed by raw XBRL tag.
+
+    NO date filter applied — same lazy approach as load_raw_annual_facts.
+    Each record preserves: end, val, filed, and (when present) start and fp.
+    start is required by _get_quarterly_series to derive period lengths.
+    """
+    json_path = Path(edgar_dir_str) / f"CIK{padded_cik}.json"
+    if not json_path.exists():
+        return {}
+    raw = json.loads(json_path.read_bytes())
+    us_gaap: dict = raw.get("facts", {}).get("us-gaap", {})
+    result: dict[str, list[dict]] = {}
+    for tag in _RAW_XBRL_TAGS:
+        concept = us_gaap.get(tag)
+        if not concept:
+            continue
+        usd_recs: list[dict] = concept.get("units", {}).get("USD", [])
+        collected = []
+        for rec in usd_recs:
+            if rec.get("form") not in {"10-Q", "10-Q/A"}:
+                continue
+            filed = rec.get("filed", "")
+            end   = rec.get("end",   "")
+            val   = rec.get("val")
+            if not filed or not end or val is None:
+                continue
+            entry: dict = {"end": end, "val": float(val), "filed": filed}
+            if rec.get("start"):
+                entry["start"] = rec["start"]
+            if rec.get("fp"):
+                entry["fp"] = rec["fp"]
+            collected.append(entry)
+        if collected:
+            result[tag] = collected
+    return result
+
+
+def _get_quarterly_series(
+    cik: str,
+    concept: str,
+    as_of_date: pd.Timestamp,
+    edgar_dir: Path,
+    n_quarters: int = 8,
+) -> pd.Series:
+    """Return the last n_quarters of TRUE standalone quarterly values for an XBRL concept.
+
+    Point-in-time: only 10-Q filings with filed ≤ as_of_date are used.
+
+    Methodology
+    -----------
+    EDGAR 10-Q records for income-statement and cash-flow concepts are year-to-date
+    cumulative: Q1 is a 3-month record, Q2 and Q3 are 6-month and 9-month YTD records
+    sharing the same fiscal-year start date. Standalone quarterly values are derived:
+
+        Q1      = 3-month record directly
+        Q2 (3m) = 6-month YTD − Q1 (same fiscal-year start)
+        Q3 (3m) = 9-month YTD − 6-month YTD (same fiscal-year start)
+
+    Records are grouped by fiscal-year start month (YYYY-MM). Within each group and
+    period type the latest-filed record wins (amendment handling). End dates with
+    conflicting values are resolved the same way.
+
+    Returns pd.Series indexed by UTC period-end Timestamps, sorted ascending.
+    Empty series if fewer than 2 standalone quarterly values can be computed.
+    """
+    all_facts = load_raw_quarterly_facts(cik.zfill(10), str(edgar_dir))
+    recs = all_facts.get(concept, [])
+    if not recs:
+        return pd.Series(dtype=float)
+
+    as_of_str = as_of_date.strftime("%Y-%m-%d")
+    # Only records available at as_of_date with a start field (needed for period length)
+    available = [r for r in recs if r["filed"] <= as_of_str and r.get("start")]
+    if not available:
+        return pd.Series(dtype=float)
+
+    # Group by fiscal-year start month (YYYY-MM) and classify by period length.
+    # Q1 ≈ 75–105 d, H1 (YTD-Q2) ≈ 150–210 d, 9M (YTD-Q3) ≈ 245–310 d.
+    # {fy_start_month → {period_type → best_record}}
+    fy_groups: dict[str, dict[str, dict]] = defaultdict(dict)
+
+    for rec in available:
+        start = rec["start"]
+        end   = rec["end"]
+        try:
+            period_days = (pd.Timestamp(end) - pd.Timestamp(start)).days
+        except Exception:
+            continue
+
+        if 75 <= period_days <= 105:
+            period_type = "Q1"
+        elif 150 <= period_days <= 210:
+            period_type = "H1"
+        elif 245 <= period_days <= 310:
+            period_type = "9M"
+        else:
+            continue
+
+        fy_key = start[:7]  # "YYYY-MM" — same for Q1, H1, 9M of the same fiscal year
+        existing = fy_groups[fy_key].get(period_type)
+        if existing is None or rec["filed"] > existing["filed"]:
+            fy_groups[fy_key][period_type] = rec
+
+    # Derive standalone quarterly values; latest amendment wins per end date.
+    quarterly: dict[str, dict] = {}  # {end_date → {val, filed}}
+
+    def _keep(end: str, val: float, filed: str) -> None:
+        existing = quarterly.get(end)
+        if existing is None or filed > existing["filed"]:
+            quarterly[end] = {"val": val, "filed": filed}
+
+    for fy_key, periods in fy_groups.items():
+        q1 = periods.get("Q1")
+        h1 = periods.get("H1")
+        nm = periods.get("9M")
+
+        if q1:
+            _keep(q1["end"], q1["val"], q1["filed"])
+
+        if h1 and q1:
+            _keep(h1["end"], h1["val"] - q1["val"], h1["filed"])
+
+        if nm and h1:
+            _keep(nm["end"], nm["val"] - h1["val"], nm["filed"])
+
+    if len(quarterly) < 2:
+        return pd.Series(dtype=float)
+
+    idx  = pd.to_datetime(list(quarterly.keys()), utc=True)
+    vals = [quarterly[k]["val"] for k in quarterly]
+    series = pd.Series(vals, index=idx, dtype=float).sort_index()
+    return series.tail(n_quarters)
+
+
+def _get_quarterly_metric(
+    cik: str,
+    keys: list[str],
+    as_of_date: pd.Timestamp,
+    edgar_dir: Path,
+    n_quarters: int = 8,
+) -> pd.Series:
+    """Return the first non-empty quarterly Series for a list of XBRL tag alternatives."""
+    for key in keys:
+        s = _get_quarterly_series(cik, key, as_of_date, edgar_dir, n_quarters)
+        if not s.empty:
+            return s
+    return pd.Series(dtype=float)
 
 
 def get_raw_pivoted(
@@ -479,6 +634,85 @@ def compute_snapshot_row(
             raw = (ni_n - ni_n1) / abs(ni_n1)
             eps_surprise_last_q = max(-2.0, min(5.0, raw))
 
+    # ── Phase 5: Quarterly features (requires cik, as_of_date, edgar_dir) ──
+    # These are NaN when the caller does not supply the optional parameters
+    # (e.g. when running against a pre-built cache without quarterly data).
+
+    revenue_growth_q1yoy:    float | None = None
+    revenue_accel_quarterly: float | None = None
+    gross_margin_q_latest:   float | None = None
+    fcf_q_last2:             int   | None = None
+
+    if cik is not None and as_of_date is not None and edgar_dir is not None:
+        rev_q = _get_quarterly_metric(
+            cik,
+            ["Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax", "SalesRevenueNet"],
+            as_of_date, edgar_dir,
+        )
+        gp_q = _get_quarterly_metric(cik, ["GrossProfit"], as_of_date, edgar_dir)
+        ocf_q = _get_quarterly_metric(
+            cik, ["NetCashProvidedByUsedInOperatingActivities"], as_of_date, edgar_dir,
+        )
+        capex_q = _get_quarterly_metric(
+            cik, ["PaymentsToAcquirePropertyPlantAndEquipment", "CapitalExpenditures"],
+            as_of_date, edgar_dir,
+        )
+
+        # revenue_growth_q1yoy: most recent quarter vs same quarter 1 year ago.
+        # Match by end date ≈ 12 months prior (±45-day tolerance).
+        if len(rev_q) >= 5:
+            last_end  = rev_q.index[-1]
+            target    = last_end - pd.DateOffset(months=12)
+            prior_idx = rev_q.index[:-1]
+            abs_diffs = [abs((prior_idx[i] - target).total_seconds() / 86400)
+                         for i in range(len(prior_idx))]
+            min_pos   = int(pd.Series(abs_diffs).argmin())
+            if abs_diffs[min_pos] <= 45:
+                rv_now = _to_float(rev_q.iloc[-1])
+                rv_yoy = _to_float(rev_q.iloc[min_pos])
+                if rv_now is not None and rv_yoy is not None and rv_yoy != 0:
+                    raw = rv_now / rv_yoy - 1.0
+                    revenue_growth_q1yoy = max(-1.0, min(5.0, raw))
+
+        # revenue_accel_quarterly: sequential QoQ growth-rate change.
+        # More sensitive than annual: measures whether QoQ growth is speeding up.
+        if len(rev_q) >= 3:
+            rv_list = [_to_float(v) for v in rev_q.values if _to_float(v) is not None]
+            if len(rv_list) >= 3:
+                q_last   = rv_list[-1]
+                q_prior  = rv_list[-2]
+                q_2prior = rv_list[-3]
+                if q_prior != 0 and q_2prior != 0:
+                    recent_qoq = (q_last  - q_prior)  / abs(q_prior)
+                    prior_qoq  = (q_prior - q_2prior) / abs(q_2prior)
+                    raw = recent_qoq - prior_qoq
+                    revenue_accel_quarterly = max(-2.0, min(2.0, raw))
+
+        # gross_margin_q_latest: gross profit / revenue for the most recent quarter.
+        # Uses the most recent date present in both quarterly series.
+        if not rev_q.empty and not gp_q.empty:
+            common_q = rev_q.index.intersection(gp_q.index)
+            if len(common_q) >= 1:
+                latest_q = common_q[-1]
+                rv_val = _to_float(rev_q.loc[latest_q])
+                gp_val = _to_float(gp_q.loc[latest_q])
+                if rv_val is not None and rv_val > 0 and gp_val is not None:
+                    gross_margin_q_latest = gp_val / rv_val
+
+        # fcf_q_last2: count of FCF-positive quarters in the last 2 quarters.
+        # Quarterly FCF = quarterly OCF − |quarterly CapEx|.
+        if not ocf_q.empty and not capex_q.empty:
+            common_fcf = ocf_q.index.intersection(capex_q.index)
+            if len(common_fcf) >= 2:
+                last2 = common_fcf[-2:]
+                positive_count = 0
+                for q_ts in last2:
+                    o = _to_float(ocf_q.loc[q_ts])
+                    c = _to_float(capex_q.loc[q_ts])
+                    if o is not None and c is not None and (o - abs(c)) > 0:
+                        positive_count += 1
+                fcf_q_last2 = positive_count
+
     # Valuation multiples: price × EDGAR shares → market cap → multiples
     _MAX_MULTIPLE = 200.0
     p_fcf_val: float | None = None
@@ -544,6 +778,11 @@ def compute_snapshot_row(
         "asset_growth_yoy":              asset_growth_yoy,
         "deferred_revenue_growth":       deferred_revenue_growth,
         "eps_surprise_last_q":           eps_surprise_last_q,
+        # ── Phase 5: Quarterly features ──
+        "revenue_growth_q1yoy":          revenue_growth_q1yoy,
+        "revenue_accel_quarterly":       revenue_accel_quarterly,
+        "gross_margin_q_latest":         gross_margin_q_latest,
+        "fcf_q_last2":                   fcf_q_last2,
     }
 
 

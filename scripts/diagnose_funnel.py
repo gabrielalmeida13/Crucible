@@ -49,6 +49,7 @@ from crucible.tracks.track2_growth import (
     filter_leverage_soft as filter_leverage_t2,
     filter_revenue_acceleration,
     filter_revenue_growth_10pct,
+    filter_revenue_growth_qyoy,
 )
 from crucible.tracks.track3_value import (
     filter_fcf_positive_last5,
@@ -130,22 +131,38 @@ def _compute_funnel_track2(
         n_insuff = int(df["insufficient_data"].astype(bool).sum())
         usable   = df[~df["insufficient_data"].astype(bool)]
 
-        after_growth  = filter_revenue_growth_10pct(usable, thresholds.revenue_growth_min_pct)
+        # Quarterly feature coverage (0 when columns absent — old cache)
+        n_qyoy_covered = (
+            int(usable["revenue_growth_q1yoy"].notna().sum())
+            if "revenue_growth_q1yoy" in usable.columns else 0
+        )
+        n_qaccel_covered = (
+            int(usable["revenue_accel_quarterly"].notna().sum())
+            if "revenue_accel_quarterly" in usable.columns else 0
+        )
+
+        after_growth  = filter_revenue_growth_qyoy(
+            usable,
+            min_qyoy_pct=thresholds.revenue_growth_qyoy_min_pct,
+            annual_fallback_pct=thresholds.revenue_growth_min_pct,
+        )
         after_accel   = filter_revenue_acceleration(after_growth)
         after_margin  = filter_gross_margin_growth(after_accel, thresholds.gross_margin_min)
         after_fcf     = filter_fcf_positive_last2yr(after_margin, thresholds.fcf_positive_last2yr_min)
         after_debt    = filter_leverage_t2(after_fcf, thresholds.net_debt_ebitda_soft_max)
 
         rows.append({
-            "date":              date.date(),
-            "total_tickers":     total,
-            "insufficient_data": n_insuff,
-            "passed_rev_growth": len(after_growth),
-            "passed_rev_accel":  len(after_accel),
-            "passed_margin":     len(after_margin),
-            "passed_fcf":        len(after_fcf),
-            "passed_leverage":   len(after_debt),
-            "passed_all":        len(after_debt),
+            "date":                  date.date(),
+            "total_tickers":         total,
+            "insufficient_data":     n_insuff,
+            "q1yoy_covered":         n_qyoy_covered,
+            "q_accel_covered":       n_qaccel_covered,
+            "passed_rev_growth":     len(after_growth),
+            "passed_rev_accel":      len(after_accel),
+            "passed_margin":         len(after_margin),
+            "passed_fcf":            len(after_fcf),
+            "passed_leverage":       len(after_debt),
+            "passed_all":            len(after_debt),
         })
     return rows
 
@@ -287,7 +304,9 @@ def _print_table_track2(
         ("date",        "date",              10),
         ("total",       "total_tickers",      6),
         ("insuff",      "insufficient_data",  6),
-        ("→rev>10%",    "passed_rev_growth",  8),
+        ("q1yoy_cov",   "q1yoy_covered",      9),
+        ("qaccel_cov",  "q_accel_covered",    9),
+        ("→rev_qyoy",   "passed_rev_growth",  9),
         ("→accel",      "passed_rev_accel",   6),
         ("→margin",     "passed_margin",      7),
         ("→fcf2yr",     "passed_fcf",         7),
@@ -298,7 +317,8 @@ def _print_table_track2(
     print()
     print(f"Track 2 Filter Funnel — {universe}, annual snapshots Jan 2010–2021")
     print(
-        f"Thresholds: Rev growth > {thresholds.revenue_growth_min_pct:.0%} (both years)  |  "
+        f"Thresholds: Rev QoQ-YoY > {thresholds.revenue_growth_qyoy_min_pct:.0%} "
+        f"(fallback: annual > {thresholds.revenue_growth_min_pct:.0%})  |  "
         f"Rev acceleration > 0  |  "
         f"Gross margin ≥ {thresholds.gross_margin_min:.0%} OR expanding  |  "
         f"FCF positive ≥ {thresholds.fcf_positive_last2yr_min} of 2 yrs  |  "
@@ -331,16 +351,22 @@ def _print_table_track2(
     pct = lambda n, d: f"{n/d:.0%}" if d else "n/a"
 
     print("Diagnosis (Track 2 — Growth Inflection)")
-    print(f"  Average universe size:               {avg_total}")
-    print(f"  Insufficient data (< 3 yrs):         {avg_insuff}  ({pct(avg_insuff, avg_total)} of total)")
-    print(f"  Pass rev growth > 10% (both years):  {avg_row['passed_rev_growth']}  ({pct(avg_row['passed_rev_growth'], avg_usable)} of usable)")
-    print(f"  Pass revenue acceleration:           {avg_row['passed_rev_accel']}  ({pct(avg_row['passed_rev_accel'], avg_usable)} of usable)")
-    print(f"  Pass gross margin filter:            {avg_row['passed_margin']}  ({pct(avg_row['passed_margin'], avg_usable)} of usable)")
-    print(f"  Pass FCF positive ≥ 1 of 2 yrs:     {avg_row['passed_fcf']}  ({pct(avg_row['passed_fcf'], avg_usable)} of usable)")
-    print(f"  Pass leverage < 5x:                  {avg_row['passed_leverage']}  ({pct(avg_row['passed_leverage'], avg_usable)} of usable)")
-    print(f"  Pass ALL 5 filters:                  {avg_passed}  ({pct(avg_passed, avg_usable)} of usable)")
+    print(f"  Average universe size:                    {avg_total}")
+    print(f"  Insufficient data (< 3 yrs):              {avg_insuff}  ({pct(avg_insuff, avg_total)} of total)")
     print()
-    print("  Momentum filter excluded from this diagnostic — live runs will cut further.")
+    print("  Quarterly feature coverage (of usable):")
+    print(f"    revenue_growth_q1yoy:               {avg_row['q1yoy_covered']}  ({pct(avg_row['q1yoy_covered'], avg_usable)})")
+    print(f"    revenue_accel_quarterly:            {avg_row['q_accel_covered']}  ({pct(avg_row['q_accel_covered'], avg_usable)})")
+    print()
+    print("  Filter funnel:")
+    print(f"    Pass rev QoQ-YoY > 6% (+ fallback):  {avg_row['passed_rev_growth']}  ({pct(avg_row['passed_rev_growth'], avg_usable)} of usable)")
+    print(f"    Pass revenue acceleration:            {avg_row['passed_rev_accel']}  ({pct(avg_row['passed_rev_accel'], avg_usable)} of usable)")
+    print(f"    Pass gross margin filter:             {avg_row['passed_margin']}  ({pct(avg_row['passed_margin'], avg_usable)} of usable)")
+    print(f"    Pass FCF positive ≥ 1 of 2 yrs:      {avg_row['passed_fcf']}  ({pct(avg_row['passed_fcf'], avg_usable)} of usable)")
+    print(f"    Pass leverage < 8x:                   {avg_row['passed_leverage']}  ({pct(avg_row['passed_leverage'], avg_usable)} of usable)")
+    print(f"    Pass ALL 5 filters:                   {avg_passed}  ({pct(avg_passed, avg_usable)} of usable)")
+    print()
+    print("  Momentum filter excluded — live runs will cut further.")
     print()
     output_path = ROOT / "data" / "diagnostics" / f"filter_funnel_track2_{universe.lower()}.csv"
     print(f"  CSV written to: {output_path}")
@@ -521,6 +547,11 @@ def _print_column_coverage(fund_by_date: dict[pd.Timestamp, pd.DataFrame]) -> No
         "asset_growth_yoy",
         "deferred_revenue_growth",
         "eps_surprise_last_q",
+        # Phase 5: quarterly features
+        "revenue_growth_q1yoy",
+        "revenue_accel_quarterly",
+        "gross_margin_q_latest",
+        "fcf_q_last2",
     ]
     # Use the latest snapshot for a single-date coverage summary
     latest_date = max(fund_by_date)
