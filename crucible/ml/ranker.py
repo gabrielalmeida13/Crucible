@@ -17,17 +17,20 @@ LightGBM's 'lambdarank' objective optimises NDCG directly. Each monthly
 shortlist is one "query group". Relevance labels are 0–4 quintile buckets
 based on within-group 3-month forward return rank.
 
-Features
---------
-The 13 features below are extracted from the scored Track 2 shortlist.
-The three Phase 4.7 features (asset_growth_yoy, deferred_revenue_growth,
-eps_surprise_last_q) are absent from the pre-2026 snapshot cache and will
-be all-NaN → imputed to 0.0. LightGBM ignores constant features.
+Feature sets
+------------
+FEATURES (13): all Track 2 scorer outputs + raw signals + Phase 4.7 signals.
+  Includes composite_score and derived scorer components. Risk: the model
+  may learn to replicate the scorer rather than discover new signal.
 
-Walk-forward split
-------------------
-Train:    2013-01-31 → 2021-12-31  (~96 months, 20% held for early stopping)
-Validate: 2022-01-31 → 2024-12-31  (36 months, strictly out-of-sample)
+ECONOMIC_FEATURES (4): momentum_3m, revenue_growth_yr1, gross_margin_latest,
+  revenue_acceleration. Raw inputs with independent economic justification —
+  no scorer-derived quantities. Avoids circular learning.
+
+Walk-forward options
+--------------------
+walk_forward_validate()       — single train/val split (2013–2021 / 2022–2024)
+expanding_window_validate()   — 10-fold expanding window (min 24m train, 12m val)
 
 Deployment gate (December 2026)
 -------------------------------
@@ -37,11 +40,14 @@ score-based ranking is confirmed on the prospective held-out
 
 Public API
 ----------
-build_training_dataset()  — (X, y_labels, group_sizes) from snapshots
-train_ranker()            — LGBMRanker artifact
-rank_shortlist()          — adds ml_score to a scored shortlist DataFrame
-evaluate_ranker()         — NDCG@5 and hit-rate metrics
-walk_forward_validate()   — full train → validate pipeline
+build_training_dataset()          — (X, y_labels, group_sizes) from snapshots
+train_ranker()                    — LGBMRanker with any feature set
+train_ranker_economic_features()  — LGBMRanker using only ECONOMIC_FEATURES
+rank_shortlist()                  — adds ml_score to a scored shortlist
+blend_rankings()                  — average score-rank + ml-rank positions
+evaluate_ranker()                 — NDCG@5 and hit-rate metrics
+walk_forward_validate()           — single-split pipeline
+expanding_window_validate()       — 10-fold expanding-window CV
 save_ranker() / load_ranker()
 """
 from __future__ import annotations
@@ -87,6 +93,20 @@ FEATURES: list[str] = [
     "asset_growth_yoy",         # Phase 4.7 — NaN in pre-2026 cache
     "deferred_revenue_growth",  # Phase 4.7 — NaN in pre-2026 cache
     "eps_surprise_last_q",      # Phase 4.7 — NaN in pre-2026 cache
+]
+
+# Four raw features with independent economic justification — no scorer-derived
+# quantities, so the model cannot simply learn to replicate composite_score.
+#
+#  momentum_3m         — short-term price momentum: post-earnings drift, trend
+#  revenue_growth_yr1  — most recent year revenue growth: direct growth signal
+#  gross_margin_latest — profitability quality: structural moat proxy
+#  revenue_acceleration— growth rate is rising: captures inflection point
+ECONOMIC_FEATURES: list[str] = [
+    "momentum_3m",
+    "revenue_growth_yr1",
+    "gross_margin_latest",
+    "revenue_acceleration",
 ]
 
 TRAIN_START_DEFAULT = pd.Timestamp("2013-01-31", tz="UTC")
@@ -178,6 +198,78 @@ class ValidationResult:
     feature_importances: pd.Series = field(
         default_factory=lambda: pd.Series(dtype=float)
     )
+
+
+@dataclass
+class FoldResult:
+    """Per-fold outcome from expanding_window_validate().
+
+    Each metric is the mean across validation months within that fold
+    (not a per-month record). This mirrors ValidationResult but is
+    lighter — it stores one number per metric per fold.
+    """
+
+    fold_idx: int
+    train_start: str
+    train_end: str
+    val_start: str
+    val_end: str
+    n_train_groups: int   # months with ≥2 priced picks used for training
+    n_val_months: int     # evaluation months in this fold's validation window
+
+    # Fold-mean metrics for score-based, ML, and blended rankings
+    score_ndcg:    float
+    ml_ndcg:       float
+    blend_ndcg:    float
+
+    score_hr1:     float   # top-1 positive-3m-return rate
+    ml_hr1:        float
+    blend_hr1:     float
+
+    score_avg_ret1: float  # avg 3m return of top-1 pick
+    ml_avg_ret1:    float
+    blend_avg_ret1: float
+
+
+@dataclass
+class ExpandingWindowResult:
+    """Aggregated results from expanding-window cross-validation.
+
+    Each fold trains on all data up to its cutoff and validates on the
+    next val_months.  Cross-fold means and standard deviations capture
+    the stability of each approach across different market regimes.
+    """
+
+    folds: list[FoldResult]
+    n_folds: int
+    feature_names: list[str]
+    blend_weight: float
+
+    # Cross-fold mean ± std for NDCG@5
+    score_ndcg_mean: float = float("nan")
+    score_ndcg_std:  float = float("nan")
+    ml_ndcg_mean:    float = float("nan")
+    ml_ndcg_std:     float = float("nan")
+    blend_ndcg_mean: float = float("nan")
+    blend_ndcg_std:  float = float("nan")
+
+    # Cross-fold mean ± std for top-1 hit rate
+    score_hr1_mean:  float = float("nan")
+    score_hr1_std:   float = float("nan")
+    ml_hr1_mean:     float = float("nan")
+    ml_hr1_std:      float = float("nan")
+    blend_hr1_mean:  float = float("nan")
+    blend_hr1_std:   float = float("nan")
+
+    # Improvement vs score baseline (mean ± std across folds)
+    ml_hr1_delta_mean:    float = float("nan")
+    ml_hr1_delta_std:     float = float("nan")
+    blend_hr1_delta_mean: float = float("nan")
+    blend_hr1_delta_std:  float = float("nan")
+
+    # Gate: mean improvement across folds ≥ 3pp
+    beats_3pp_ml:    bool = False
+    beats_3pp_blend: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -319,6 +411,70 @@ def _ndcg_at_k(
     idcg = sum(_rel(ideal[i]) / np.log2(i + 2) for i in range(len(ideal)))
 
     return dcg / idcg if idcg > 0 else 1.0
+
+
+def _blend_rank_tickers(
+    score_ranked: list[str],
+    ml_ranked: list[str],
+    weight: float,
+) -> list[str]:
+    """Return tickers sorted by weighted average of 1-indexed rank positions.
+
+    weight applies to the ML ranking (0 = pure score, 1 = pure ML, 0.5 = equal).
+    Tickers absent from one list are placed last in that ordering.
+    """
+    all_tickers = list(dict.fromkeys(score_ranked + ml_ranked))
+    n = len(all_tickers)
+    score_pos = {t: i + 1 for i, t in enumerate(score_ranked)}
+    ml_pos    = {t: i + 1 for i, t in enumerate(ml_ranked)}
+    blend: dict[str, float] = {
+        t: (1 - weight) * score_pos.get(t, n) + weight * ml_pos.get(t, n)
+        for t in all_tickers
+    }
+    return sorted(all_tickers, key=lambda t: blend[t])
+
+
+def _eval_month(
+    shortlist_ok: pd.DataFrame,
+    fwd: dict[str, float],
+    artifact: RankerArtifact,
+    blend_weight: float,
+    k: int,
+) -> dict:
+    """Evaluate score / ML / blend rankings for one month; return metrics dict."""
+    tickers_ok = [t for t in shortlist_ok.index if t in fwd]
+    all_rets = [fwd[t] for t in tickers_ok]
+
+    score_ranked = tickers_ok                                   # composite_score order
+    ml_sl        = rank_shortlist(shortlist_ok, artifact)
+    ml_ranked    = [t for t in ml_sl.index if t in fwd]
+    blend_ranked = _blend_rank_tickers(score_ranked, ml_ranked, blend_weight)
+
+    def _ndcg(ranked: list[str]) -> float:
+        rets_in_order = [fwd[t] for t in ranked if t in fwd]
+        return _ndcg_at_k(rets_in_order, all_rets, k)
+
+    def _hr1(ranked: list[str]) -> float | None:
+        t = ranked[0] if ranked else None
+        r = fwd.get(t, float("nan")) if t else float("nan")
+        return None if np.isnan(r) else float(r > 0)
+
+    def _ret1(ranked: list[str]) -> float | None:
+        t = ranked[0] if ranked else None
+        r = fwd.get(t, float("nan")) if t else float("nan")
+        return None if np.isnan(r) else r
+
+    return {
+        "score_ndcg":    _ndcg(score_ranked),
+        "ml_ndcg":       _ndcg(ml_ranked),
+        "blend_ndcg":    _ndcg(blend_ranked),
+        "score_hr1":     _hr1(score_ranked),
+        "ml_hr1":        _hr1(ml_ranked),
+        "blend_hr1":     _hr1(blend_ranked),
+        "score_ret1":    _ret1(score_ranked),
+        "ml_ret1":       _ret1(ml_ranked),
+        "blend_ret1":    _ret1(blend_ranked),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -726,6 +882,318 @@ def walk_forward_validate(
         (result.ml_hit_rate_1 - result.score_hit_rate_1) * 100,
     )
     return artifact, result
+
+
+# ---------------------------------------------------------------------------
+# Public API — economic-features trainer
+# ---------------------------------------------------------------------------
+
+
+def train_ranker_economic_features(
+    fund_by_date: dict[pd.Timestamp, pd.DataFrame],
+    prices: pd.DataFrame,
+    config: CrucibleConfig,
+    train_start: pd.Timestamp,
+    train_end: pd.Timestamp,
+    forward_months: int = FORWARD_MONTHS,
+) -> RankerArtifact:
+    """Train a LGBMRanker using only ECONOMIC_FEATURES.
+
+    Uses four raw signals with independent economic justification:
+      momentum_3m, revenue_growth_yr1, gross_margin_latest, revenue_acceleration
+
+    These are absent from composite_score's construction, so the model
+    cannot learn a trivial mapping from scorer outputs back to itself.
+    This is the cleanest test of whether the fundamentals alone carry
+    ranking signal beyond the hand-tuned scorer weights.
+
+    See also: train_ranker() for the full 13-feature variant.
+    """
+    if not _HAS_LGBM:
+        raise ImportError("lightgbm is required. Install: uv add lightgbm")
+
+    log.info(
+        "Building economic-features training dataset [%s → %s] ...",
+        train_start.strftime("%Y-%m"), train_end.strftime("%Y-%m"),
+    )
+    X, y, groups = build_training_dataset(
+        fund_by_date, prices, config,
+        start=train_start, end=train_end,
+        forward_months=forward_months,
+        feature_names=ECONOMIC_FEATURES,
+    )
+    if X.empty:
+        raise ValueError(
+            "No training data for economic features. "
+            "Check snapshot coverage and Track 2 filter thresholds."
+        )
+    log.info(
+        "Economic-features training: %d samples (%d groups), features=%s",
+        len(X), len(groups), ECONOMIC_FEATURES,
+    )
+    return train_ranker(X, y, groups, train_start, train_end)
+
+
+# ---------------------------------------------------------------------------
+# Public API — rank blending
+# ---------------------------------------------------------------------------
+
+
+def blend_rankings(
+    score_df: pd.DataFrame,
+    ml_df: pd.DataFrame,
+    weight: float = 0.5,
+) -> pd.DataFrame:
+    """Combine score-based and ML rankings by averaging rank positions.
+
+    Parameters
+    ----------
+    score_df : shortlist sorted by composite_score descending (standard scorer output)
+    ml_df    : same tickers sorted by ml_score descending (output of rank_shortlist)
+    weight   : fraction of the final rank from the ML ordering
+               0.0 = pure score, 1.0 = pure ML, 0.5 = equal blend (default)
+
+    Returns
+    -------
+    DataFrame with all columns from score_df, plus ml_score (from ml_df),
+    score_rank, ml_rank, and blend_rank, sorted by blend_rank ascending
+    (lower blend_rank = better combined position).
+
+    Ties in blend_rank are broken by score_rank (i.e., score-based order wins ties).
+    """
+    if score_df.empty:
+        return score_df.copy()
+
+    tickers = list(score_df.index)
+    n = len(tickers)
+
+    score_pos: dict[str, int] = {t: i + 1 for i, t in enumerate(tickers)}
+    ml_pos:    dict[str, int] = {
+        t: i + 1 for i, t in enumerate(ml_df.index) if t in score_pos
+    }
+
+    result = score_df.copy()
+
+    # Carry ml_score across if present
+    if "ml_score" in ml_df.columns:
+        result["ml_score"] = ml_df.reindex(result.index)["ml_score"]
+
+    result["score_rank"] = result.index.map(lambda t: score_pos.get(t, n))
+    result["ml_rank"]    = result.index.map(lambda t: ml_pos.get(t, n))
+    result["blend_rank"] = (
+        (1 - weight) * result["score_rank"] + weight * result["ml_rank"]
+    )
+
+    return result.sort_values(["blend_rank", "score_rank"], ascending=True)
+
+
+# ---------------------------------------------------------------------------
+# Public API — expanding-window cross-validation
+# ---------------------------------------------------------------------------
+
+
+def expanding_window_validate(
+    fund_by_date: dict[pd.Timestamp, pd.DataFrame],
+    prices: pd.DataFrame,
+    config: CrucibleConfig,
+    n_folds: int = 10,
+    min_train_months: int = 24,
+    val_months: int = 12,
+    forward_months: int = FORWARD_MONTHS,
+    k: int = NDCG_K,
+    feature_names: list[str] | None = None,
+    blend_weight: float = 0.5,
+) -> ExpandingWindowResult:
+    """10-fold expanding-window cross-validation of the LambdaMART ranker.
+
+    Fold layout (default: 10 folds, 24-month min-train, 12-month val)
+    -----------------------------------------------------------------
+    Fold 0 : train [dates 0..23]   → val [dates 24..35]
+    Fold 1 : train [dates 0..35]   → val [dates 36..47]
+    ...
+    Fold 9 : train [dates 0..131]  → val [dates 132..143]
+
+    For 144 available dates (2013-01 → 2024-12) this covers the full range
+    with training expanding by val_months each fold.
+
+    A fresh model is trained on each fold's training window (no data leakage
+    across folds). The last forward_months of each training window may have
+    incomplete labels; build_training_dataset handles this gracefully.
+
+    Each fold reports mean metrics across its validation months:
+      - NDCG@k for score-based, ML, and 50/50 blend rankings
+      - Top-1 hit rate (positive 3m return) for all three
+
+    Returns ExpandingWindowResult with per-fold details and cross-fold
+    mean ± std, plus a boolean flag for whether mean improvement ≥ 3pp.
+
+    Parameters
+    ----------
+    feature_names : which features to use (defaults to FEATURES).
+                    Pass ECONOMIC_FEATURES to test the no-circular variant.
+    blend_weight  : ML weight in the blend (0.5 = equal score + ML).
+    """
+    if not _HAS_LGBM:
+        raise ImportError("lightgbm is required. Install: uv add lightgbm")
+
+    if feature_names is None:
+        feature_names = FEATURES
+
+    dates     = sorted(fund_by_date.keys())
+    price_idx = prices.index
+    n_dates   = len(dates)
+
+    # Validate that we have enough months for the requested folds
+    required = min_train_months + n_folds * val_months
+    if n_dates < required:
+        raise ValueError(
+            f"Not enough snapshot dates for {n_folds} folds: "
+            f"need {required}, have {n_dates}. "
+            f"Reduce n_folds or min_train_months."
+        )
+
+    fold_results: list[FoldResult] = []
+
+    for fold_idx in range(n_folds):
+        train_end_idx = min_train_months + fold_idx * val_months - 1
+        val_start_idx = train_end_idx + 1
+        val_end_idx   = val_start_idx + val_months - 1
+
+        train_start_ts = dates[0]
+        train_end_ts   = dates[train_end_idx]
+        val_start_ts   = dates[val_start_idx]
+        val_end_ts     = dates[val_end_idx]
+
+        log.info(
+            "Fold %d/%d  train [%s → %s]  val [%s → %s]",
+            fold_idx + 1, n_folds,
+            train_start_ts.strftime("%Y-%m"), train_end_ts.strftime("%Y-%m"),
+            val_start_ts.strftime("%Y-%m"),   val_end_ts.strftime("%Y-%m"),
+        )
+
+        # ── Train ────────────────────────────────────────────────────────────
+        X, y, groups = build_training_dataset(
+            fund_by_date, prices, config,
+            start=train_start_ts, end=train_end_ts,
+            forward_months=forward_months,
+            feature_names=feature_names,
+        )
+        if X.empty or len(groups) < 4:
+            log.warning("Fold %d: insufficient training data — skipping", fold_idx)
+            continue
+
+        artifact = train_ranker(X, y, groups, train_start_ts, train_end_ts)
+
+        # ── Evaluate ─────────────────────────────────────────────────────────
+        val_dates = [d for d in dates[val_start_idx : val_end_idx + 1]]
+
+        col_lists: dict[str, list[float]] = {
+            k: [] for k in (
+                "score_ndcg", "ml_ndcg", "blend_ndcg",
+                "score_hr1",  "ml_hr1",  "blend_hr1",
+                "score_ret1", "ml_ret1", "blend_ret1",
+            )
+        }
+        n_val_used = 0
+
+        for date in val_dates:
+            shortlist = _get_shortlist(fund_by_date[date], config)
+            if shortlist.empty:
+                continue
+            tickers = shortlist.index.tolist()
+            fwd = _forward_returns(tickers, date, prices, price_idx, forward_months)
+            if len(fwd) < 2:
+                continue
+
+            tickers_ok   = [t for t in tickers if t in fwd]
+            shortlist_ok = shortlist.loc[tickers_ok]
+
+            m = _eval_month(shortlist_ok, fwd, artifact, blend_weight, k)
+            n_val_used += 1
+            for key in col_lists:
+                v = m[key]
+                if v is not None and not np.isnan(v):
+                    col_lists[key].append(v)
+
+        def _fold_mean(key: str) -> float:
+            lst = col_lists[key]
+            return float(np.mean(lst)) if lst else float("nan")
+
+        fold_results.append(FoldResult(
+            fold_idx=fold_idx,
+            train_start=train_start_ts.strftime("%Y-%m"),
+            train_end=train_end_ts.strftime("%Y-%m"),
+            val_start=val_start_ts.strftime("%Y-%m"),
+            val_end=val_end_ts.strftime("%Y-%m"),
+            n_train_groups=len(groups),
+            n_val_months=n_val_used,
+            score_ndcg=_fold_mean("score_ndcg"),
+            ml_ndcg=_fold_mean("ml_ndcg"),
+            blend_ndcg=_fold_mean("blend_ndcg"),
+            score_hr1=_fold_mean("score_hr1"),
+            ml_hr1=_fold_mean("ml_hr1"),
+            blend_hr1=_fold_mean("blend_hr1"),
+            score_avg_ret1=_fold_mean("score_ret1"),
+            ml_avg_ret1=_fold_mean("ml_ret1"),
+            blend_avg_ret1=_fold_mean("blend_ret1"),
+        ))
+
+    if not fold_results:
+        raise ValueError("No folds produced results — check snapshot and price coverage.")
+
+    # ── Aggregate across folds ───────────────────────────────────────────────
+    def _agg(attr: str) -> tuple[float, float]:
+        vals = [getattr(f, attr) for f in fold_results if not np.isnan(getattr(f, attr))]
+        if not vals:
+            return float("nan"), float("nan")
+        return float(np.mean(vals)), float(np.std(vals, ddof=1) if len(vals) > 1 else 0.0)
+
+    ml_hr1_deltas    = [f.ml_hr1    - f.score_hr1 for f in fold_results
+                        if not (np.isnan(f.ml_hr1) or np.isnan(f.score_hr1))]
+    blend_hr1_deltas = [f.blend_hr1 - f.score_hr1 for f in fold_results
+                        if not (np.isnan(f.blend_hr1) or np.isnan(f.score_hr1))]
+
+    def _delta_agg(deltas: list[float]) -> tuple[float, float]:
+        if not deltas:
+            return float("nan"), float("nan")
+        return float(np.mean(deltas)), float(np.std(deltas, ddof=1) if len(deltas) > 1 else 0.0)
+
+    ml_dm,    ml_ds    = _delta_agg(ml_hr1_deltas)
+    blend_dm, blend_ds = _delta_agg(blend_hr1_deltas)
+
+    sn_m, sn_s = _agg("score_ndcg");  mn_m, mn_s = _agg("ml_ndcg");   bn_m, bn_s = _agg("blend_ndcg")
+    sh_m, sh_s = _agg("score_hr1");   mh_m, mh_s = _agg("ml_hr1");    bh_m, bh_s = _agg("blend_hr1")
+
+    result = ExpandingWindowResult(
+        folds=fold_results,
+        n_folds=len(fold_results),
+        feature_names=feature_names,
+        blend_weight=blend_weight,
+        score_ndcg_mean=sn_m,  score_ndcg_std=sn_s,
+        ml_ndcg_mean=mn_m,     ml_ndcg_std=mn_s,
+        blend_ndcg_mean=bn_m,  blend_ndcg_std=bn_s,
+        score_hr1_mean=sh_m,   score_hr1_std=sh_s,
+        ml_hr1_mean=mh_m,      ml_hr1_std=mh_s,
+        blend_hr1_mean=bh_m,   blend_hr1_std=bh_s,
+        ml_hr1_delta_mean=ml_dm,       ml_hr1_delta_std=ml_ds,
+        blend_hr1_delta_mean=blend_dm, blend_hr1_delta_std=blend_ds,
+        beats_3pp_ml=ml_dm >= 0.03    if not np.isnan(ml_dm)    else False,
+        beats_3pp_blend=blend_dm >= 0.03 if not np.isnan(blend_dm) else False,
+    )
+
+    log.info(
+        "Expanding-window CV (%d folds) | "
+        "ML HR@1: %.1f%%±%.1f (Δ%+.1f pp) | "
+        "Blend HR@1: %.1f%%±%.1f (Δ%+.1f pp) | "
+        "Score HR@1: %.1f%%",
+        result.n_folds,
+        result.ml_hr1_mean * 100,    result.ml_hr1_std * 100,
+        result.ml_hr1_delta_mean * 100,
+        result.blend_hr1_mean * 100, result.blend_hr1_std * 100,
+        result.blend_hr1_delta_mean * 100,
+        result.score_hr1_mean * 100,
+    )
+    return result
 
 
 # ---------------------------------------------------------------------------

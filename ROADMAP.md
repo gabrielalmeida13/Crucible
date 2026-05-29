@@ -114,13 +114,22 @@ validate in December.
       Phase 4.7 signals; 4.7 features absent from pre-2026 cache → imputed)
 - [x] Walk-forward: train 2013-2021 (20% internal val for early stopping),
       validate 2022-2024; metrics: NDCG@5 + hit-rate improvement
-- [x] `scripts/run_phase50_ranker.py` — execution script; saves
-      `data/results/phase50_ranker_validation.md` and
-      `data/models/phase50_ranker.pkl`
-- [ ] Run validation script (requires prices download ~15-30 min)
+- [x] `scripts/run_phase50_ranker.py` — single-split validation script
+- [x] `ECONOMIC_FEATURES` (4): momentum_3m, revenue_growth_yr1,
+      gross_margin_latest, revenue_acceleration — no scorer-derived quantities,
+      avoids circular learning; trained via `train_ranker_economic_features()`
+- [x] `expanding_window_validate()` — 10-fold expanding-window CV
+      (min 24m train, 12m val/fold); covers full 2013–2024 range across
+      10 distinct market regimes; reports mean ± std of NDCG@5 and HR@1
+- [x] `blend_rankings(score_df, ml_df, weight=0.5)` — Borda-count style
+      blending: averages 1-indexed rank positions from score and ML orderings
+- [x] `scripts/run_phase50_comparison.py` — tests all 4 combinations
+      (full ML, full+blend, economic ML, economic+blend) against score baseline;
+      writes comparison table to `data/results/phase50_ranker_validation.md`
+- [ ] Run comparison script (requires prices download ~15-30 min)
 - [ ] December 2026: run held-out on prospective data 2026-06 to 2026-12
-- [ ] Exit criterion: model ranking improves hit rate by ≥ 3pp vs score-based
-      on prospective held-out. If not met, document and do not deploy.
+- [ ] Exit criterion: at least one combination achieves ≥ 3pp HR@1 improvement
+      on the prospective held-out. If not met, document and do not deploy.
 
 ### 5.1 — Options module (start now — XTB has options in Portugal)
 
