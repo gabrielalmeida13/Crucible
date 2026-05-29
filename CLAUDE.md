@@ -7,9 +7,10 @@
 
 ## What is Crucible
 
-Crucible is a monthly quality screener for stocks across multiple global exchanges,
-starting with the S&P 500 and expanding progressively to European and Asian markets
-available through the XTB brokerage platform.
+Crucible is a monthly quality screener for stocks across the US market,
+starting with the S&P 500 and expanding progressively to the Russell 1000
+and Russell 3000 universes. European and Asian markets (available through
+the XTB brokerage) are a future expansion — Phase 4.
 
 The goal is not to predict prices. It is to filter a broad universe of companies
 using rigorous fundamental criteria, rank the resulting shortlist with a composite
@@ -22,16 +23,55 @@ the fundamental filters.
 
 ## Stack
 
-| Component        | Technology                    | Notes                                              |
-|------------------|-------------------------------|----------------------------------------------------|
-| Data (dev)       | `yfinance`                    | Free, sufficient for Phase 1 pipeline development  |
-| Data (backtest)  | Financial Modeling Prep (FMP) | Required before any backtest — point-in-time data  |
-| Processing       | `pandas`, `numpy`             | Core of the entire pipeline                        |
-| Data validation  | `pandera`                     | Schema enforcement on every DataFrame entering processing |
-| Persistence      | `sqlite3` via `SQLAlchemy`    | Stores monthly scan history                        |
-| Dashboard        | `streamlit`                   | Fast UI, aesthetics are not a priority             |
-| ML (future)      | `scikit-learn`                | Phase 3+ only                                      |
-| Environment      | Python 3.11+, `uv`            | Always prefer `uv` over `pip`                      |
+| Component        | Technology                       | Notes                                                    |
+|------------------|----------------------------------|----------------------------------------------------------|
+| Data (primary)   | SEC EDGAR API + `edgartools`     | Free, unlimited, official source, true point-in-time     |
+| Data (bulk)      | EDGAR `companyfacts.zip`         | Single download for all companies — use for backtesting  |
+| Prices           | `yfinance`                       | Price data only — not fundamentals                       |
+| Processing       | `pandas`, `numpy`                | Core of the entire pipeline                              |
+| Data validation  | `pandera`                        | Schema enforcement on every DataFrame entering processing |
+| Persistence      | `sqlite3` via `SQLAlchemy`       | Stores monthly scan history                              |
+| Dashboard        | `streamlit`                      | Fast UI, aesthetics are not a priority                   |
+| ML (future)      | `scikit-learn`                   | Phase 3+ only                                            |
+| Environment      | Python 3.11+, `uv`               | Always prefer `uv` over `pip`                            |
+
+---
+
+## Data source architecture
+
+### SEC EDGAR — primary source for all fundamentals
+
+The SEC EDGAR API (`data.sec.gov`) is the official US government source.
+It is free, has no authentication, has no rate limits beyond 10 req/s,
+and provides true point-in-time data via filing submission timestamps.
+
+Key endpoints:
+- `https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json` — all XBRL facts per company
+- `https://data.sec.gov/api/xbrl/frames/` — cross-company data per concept per period
+- Bulk: `https://www.sec.gov/Archives/edgar/daily-index/xbrl/companyfacts.zip`
+
+Use `edgartools` as the primary Python interface. For bulk backtest work,
+download `companyfacts.zip` once and query locally — do not loop over 1000+
+individual API calls.
+
+XBRL structured data is available from 2009 onwards (SEC mandate). Filings
+before 2009 exist but are unstructured (HTML/PDF) and inconsistent between
+companies — do not use pre-2009 data for fundamental metrics.
+
+### Point-in-time correctness
+
+This is non-negotiable for backtesting. EDGAR provides it natively:
+every filing has a `filed` date (the exact date the SEC received the document).
+When reconstructing a historical scan for month M, only use filings with
+`filed` date ≤ last day of month M. Never use the period end date —
+a 10-K for fiscal year ending December 2020 may be filed in February 2021.
+
+### yfinance — price data only
+
+`yfinance` is used exclusively for historical price data (OHLCV).
+It must never be used for fundamental metrics (income statement, balance sheet,
+cash flow). Its fundamentals are not point-in-time and are retroactively
+overwritten on restatements.
 
 ---
 
@@ -47,18 +87,20 @@ crucible/
 │
 ├── data/
 │   ├── raw/              # Data pulled directly from APIs — never edited manually
+│   │   ├── edgar/        # EDGAR bulk downloads and per-company JSONs
+│   │   └── prices/       # yfinance price data
 │   ├── processed/        # Data after cleaning and feature engineering
 │   └── crucible.db       # SQLite database with scan history
 │
 ├── crucible/             # Main package
 │   ├── __init__.py
 │   ├── config.py         # Thresholds, parameters, universe definitions
-│   ├── fetcher.py        # Data extraction (yfinance / FMP)
+│   ├── fetcher.py        # Fundamentals from EDGAR; prices from yfinance
 │   ├── cleaner.py        # Cleaning, normalization, missing value detection
 │   ├── validator.py      # Pandera schemas — enforced at cleaner output
 │   ├── filters.py        # Layer 1: fundamental filters (hard rules)
 │   ├── scorer.py         # Layer 2: composite quality + valuation score
-│   ├── fx.py             # Currency conversion cost adjustments
+│   ├── fx.py             # Currency conversion cost adjustments (Phase 4)
 │   ├── store.py          # SQLite read/write
 │   └── ml/               # Phase 3+ only
 │       ├── __init__.py
@@ -69,7 +111,8 @@ crucible/
 │   └── dashboard.py      # Streamlit app
 │
 ├── scripts/
-│   └── run_scan.py       # Entry point: runs the full monthly scan
+│   ├── run_scan.py           # Entry point: runs the full monthly scan
+│   └── download_edgar_bulk.py # One-time bulk download of companyfacts.zip
 │
 └── tests/
     ├── test_filters.py
@@ -85,46 +128,32 @@ crucible/
 The screener universe expands in stages. The active universe is controlled by
 `CRUCIBLE_UNIVERSE` in `.env`. Do not mix universes within a single scan run.
 
-| Stage | Universe ID       | Exchanges                                           | Approx. companies |
-|-------|-------------------|-----------------------------------------------------|-------------------|
-| 1     | `SP500`           | NYSE, NASDAQ                                        | ~500              |
-| 2     | `EUROPE_LARGE`    | LSE, Deutsche Börse (Frankfurt), Euronext Paris     | +150              |
-| 3     | `JAPAN_ADR`       | Japanese large-caps via ADRs / European listings    | +80               |
-| 4     | `XTB_FULL`        | All XTB-available stocks with sufficient data       | ~2,000–3,000      |
+| Stage | Universe ID    | Coverage                                            | Approx. companies |
+|-------|----------------|-----------------------------------------------------|-------------------|
+| 1     | `SP500`        | S&P 500 — large-cap US                              | ~500              |
+| 2     | `RUSSELL1000`  | Russell 1000 — large + mid cap US                   | ~1,000            |
+| 3     | `RUSSELL3000`  | Russell 3000 — large + mid + small cap US           | ~3,000            |
+| 4     | `EUROPE_LARGE` | LSE, Deutsche Börse, Euronext Paris (future)        | +150              |
+| 5     | `XTB_FULL`     | All XTB-available stocks with sufficient data (future) | ~2,000–3,000  |
 
-When running multi-exchange scans (Stage 2+), **sector normalization must also
-include regional normalization** — see scorer.py notes below.
+All US stages use SEC EDGAR as data source and are available from 2009.
+Stages 4 and 5 require a separate data source decision (Phase 4).
 
 ---
 
 ## Accounting standards awareness
 
-Different regions use different accounting standards. Metrics must never be
-compared raw across regions without normalization:
+For the current US-only focus, all companies use US GAAP — this simplifies
+comparison significantly. Sector normalization is still required because
+a 40% gross margin is exceptional in retail but poor in software.
+
+When Stage 4+ is active, region normalization must also be added:
 
 | Region  | Standard       | Key impact on metrics                                  |
 |---------|----------------|--------------------------------------------------------|
-| USA     | US GAAP        | Baseline for most financial databases                  |
+| USA     | US GAAP        | Current baseline — all companies comparable            |
 | Europe  | IFRS           | R&D capitalization differs; lease treatment differs    |
 | Japan   | Japanese GAAP  | Conservative revenue recognition; lower ROICs typical  |
-
-The scorer must always compare companies **within the same GICS sector AND
-the same accounting region**. Absolute threshold filters (Layer 1) may need
-region-specific calibration once Stage 2+ is active.
-
----
-
-## Currency conversion cost
-
-XTB applies a 0.5% FX conversion cost when buying stocks denominated in a
-currency different from the account currency. This is a real transaction cost
-and must be factored into the composite score.
-
-`fx.py` is responsible for:
-- Identifying the denomination currency of each ticker
-- Flagging stocks that require conversion from the user's account currency
-- Applying a configurable score penalty (default: -0.5 points) for stocks
-  requiring FX conversion, to reflect the additional transaction cost
 
 ---
 
@@ -143,6 +172,8 @@ and must be factored into the composite score.
 - Missing values must always be explicit (`NaN`), never filled with zero without documentation
 - Dates always in `datetime64[ns]` UTC
 - Every DataFrame exiting `cleaner.py` must pass its Pandera schema before proceeding
+- Point-in-time rule: when filtering EDGAR filings for a historical scan at date D,
+  only include filings with `filed` ≤ D — never use fiscal period end date as proxy
 
 ### Pandera schemas
 - Defined in `validator.py`, one schema per major DataFrame type
@@ -152,7 +183,8 @@ and must be factored into the composite score.
 ### Git
 - Commits in English, imperative: `Add ROIC filter`, `Fix missing value in cleaner`
 - One commit per logical feature/fix
-- Never commit `crucible.db`, data in `raw/` or `processed/`, or `.env` files
+- Never commit `crucible.db`, data in `raw/` or `processed/`, `.env`, or
+  the EDGAR bulk zip file (too large)
 
 ### Tests
 - Each filter in `filters.py` has at least one positive and one negative test
@@ -163,15 +195,20 @@ and must be factored into the composite score.
 
 ## What Claude Code must NOT do
 
+- **Do not use yfinance for fundamental data** — prices only; fundamentals come from EDGAR
+- **Do not use pre-2009 EDGAR data** — XBRL was not mandated before 2009; earlier data
+  is unstructured and inconsistent between companies
+- **Do not use fiscal period end date as the filing date** — always use the `filed`
+  timestamp from EDGAR for point-in-time correctness
+- **Do not loop over individual EDGAR API calls for 1000+ companies** — download
+  `companyfacts.zip` and query locally for bulk operations
 - **Do not add dependencies** without updating `pyproject.toml` and justifying in the commit
 - **Do not change thresholds** in `config.py` without explicit developer instruction
 - **Do not fill missing data** with estimates — mark as `NaN` and log
 - **Do not build the ML layer** until Phase 2 is validated (see ROADMAP.md)
 - **Do not optimize the dashboard** before the data pipeline is stable
-- **Do not run backtests using yfinance data** — yfinance does not provide point-in-time
-  data and will produce look-ahead bias; FMP must be configured before Phase 2 begins
-- **Do not compare metrics across regions** without sector + region normalization active
 - **Do not expand the universe** beyond the current stage without explicit developer instruction
+- **Do not compare metrics across sectors** without sector normalization active
 
 ---
 
@@ -180,6 +217,9 @@ and must be factored into the composite score.
 ```bash
 # Install dependencies
 uv sync
+
+# One-time: download EDGAR bulk data for backtesting
+python scripts/download_edgar_bulk.py
 
 # Run monthly scan
 python scripts/run_scan.py
@@ -193,12 +233,17 @@ streamlit run app/dashboard.py
 ## Environment variables (.env)
 
 ```
-CRUCIBLE_UNIVERSE=SP500            # SP500 | EUROPE_LARGE | JAPAN_ADR | XTB_FULL
+CRUCIBLE_UNIVERSE=SP500              # SP500 | RUSSELL1000 | RUSSELL3000
 CRUCIBLE_DB_PATH=data/crucible.db
 CRUCIBLE_LOG_LEVEL=INFO
-CRUCIBLE_FMP_API_KEY=              # Required before Phase 2
-CRUCIBLE_ACCOUNT_CURRENCY=EUR      # Used by fx.py for conversion cost calculation
+CRUCIBLE_ACCOUNT_CURRENCY=EUR        # For future FX cost calculation (Phase 4)
+EDGAR_USER_AGENT=Crucible your@email.com  # Required by SEC — identify your app
 ```
+
+> The SEC requires a User-Agent header identifying your application and contact
+> email on all requests to data.sec.gov. Set EDGAR_USER_AGENT and pass it in
+> every request header. This is not optional — repeated requests without it
+> may result in IP blocking.
 
 ---
 
@@ -208,10 +253,10 @@ CRUCIBLE_ACCOUNT_CURRENCY=EUR      # Used by fx.py for conversion cost calculati
 - The final score is a **relative ranking**, not an absolute recommendation
 - Survivorship bias: the monthly universe must be the universe **of that month**,
   not the current one — companies delisted, acquired, or removed must be included
-  in historical scans
+  in historical scans; EDGAR contains all historical filers regardless of current status
 - Backtesting is only valid with walk-forward validation — never train and test
-  on the same period
+  on the same period; a model trained on 2009–2020 and tested on 2021–2025 is
+  not the same as testing on 2009–2025 with in-sample data
+- The XBRL data cutoff is 2009 — do not attempt to extend fundamentals before this
 - The ML model is a tool, not an oracle — the monthly output is a starting point
   for further research, not a buy instruction
-- FX conversion costs are real and must not be ignored when comparing
-  cross-currency stocks in the scorer

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -296,3 +297,162 @@ def _to_sql(value: object) -> object:
     if hasattr(value, "item"):  # numpy scalar → Python scalar
         return value.item()
     return value
+
+
+# ---------------------------------------------------------------------------
+# Prospective logging — monthly_picks table (sqlite3, wide schema)
+# ---------------------------------------------------------------------------
+
+_PICKS_FLOAT_COLS: list[str] = [
+    "composite_score",
+    "quality_score",
+    "growth_quality_score",
+    "momentum_score",
+    "valuation_score",
+    "value_score",
+    "recovery_signal_score",
+    "balance_sheet_score",
+    "roic_proxy_avg",
+    "fcf_positive_years",
+    "fcf_positive_years_last5",
+    "fcf_positive_last2yr",
+    "fcf_trajectory",
+    "net_debt_ebitda",
+    "interest_coverage",
+    "revenue_growth_yr1",
+    "revenue_growth_yr2",
+    "revenue_acceleration",
+    "revenue_growth_positive_years",
+    "gross_margin_latest",
+    "gross_margin_yr1_change",
+    "gross_margin_trend_slope",
+    "momentum_raw",
+    "momentum_3m",
+    "p_fcf",
+    "p_s",
+    "ev_ebitda",
+    "p_e",
+    "share_buyback_signal",
+    "p_fcf_vs_history",
+]
+
+_CREATE_MONTHLY_PICKS = """
+CREATE TABLE IF NOT EXISTS monthly_picks (
+    run_date   TEXT NOT NULL,
+    track      INTEGER NOT NULL,
+    ticker     TEXT NOT NULL,
+    universe   TEXT NOT NULL,
+    recommendation TEXT NOT NULL,
+    sector     TEXT,
+    composite_score           REAL,
+    quality_score             REAL,
+    growth_quality_score      REAL,
+    momentum_score            REAL,
+    valuation_score           REAL,
+    value_score               REAL,
+    recovery_signal_score     REAL,
+    balance_sheet_score       REAL,
+    roic_proxy_avg            REAL,
+    fcf_positive_years        REAL,
+    fcf_positive_years_last5  REAL,
+    fcf_positive_last2yr      REAL,
+    fcf_trajectory            REAL,
+    net_debt_ebitda           REAL,
+    interest_coverage         REAL,
+    revenue_growth_yr1        REAL,
+    revenue_growth_yr2        REAL,
+    revenue_acceleration      REAL,
+    revenue_growth_positive_years REAL,
+    gross_margin_latest       REAL,
+    gross_margin_yr1_change   REAL,
+    gross_margin_trend_slope  REAL,
+    momentum_raw              REAL,
+    momentum_3m               REAL,
+    p_fcf                     REAL,
+    p_s                       REAL,
+    ev_ebitda                 REAL,
+    p_e                       REAL,
+    share_buyback_signal      REAL,
+    p_fcf_vs_history          REAL,
+    PRIMARY KEY (run_date, track, ticker)
+)
+"""
+
+_REC_MAP: dict[str, str] = {
+    "REINFORCE":    "reinforce",
+    "HOLD":         "hold",
+    "REVIEW":       "review",
+    "EXIT_SIGNAL":  "exit_signal",
+    "DATA_MISSING": None,  # type: ignore[dict-item]  # skipped
+}
+
+
+def log_monthly_picks(
+    db_path: str | Path,
+    run_date: str,
+    track: int,
+    universe: str,
+    result: pd.DataFrame,
+    portfolio_recs: pd.DataFrame | None = None,
+) -> None:
+    """Upsert screener results and portfolio recommendations into monthly_picks.
+
+    result         — screener shortlist (index=ticker); gets recommendation="new_pick"
+    portfolio_recs — evaluate_portfolio() output (index=ticker); overrides new_pick
+                     for any shared ticker; DATA_MISSING rows are skipped
+    """
+    db_path = Path(db_path)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    rows: dict[str, dict] = {}
+
+    def _base_row(ticker: str, rec: str, source: pd.Series | None) -> dict:
+        row: dict = {
+            "run_date":      run_date,
+            "track":         track,
+            "ticker":        ticker,
+            "universe":      universe,
+            "recommendation": rec,
+            "sector":        None,
+        }
+        if source is not None:
+            row["sector"] = _to_sql(source.get("sector"))
+            for col in _PICKS_FLOAT_COLS:
+                row[col] = _to_sql(source.get(col))
+        else:
+            for col in _PICKS_FLOAT_COLS:
+                row[col] = None
+        return row
+
+    # Screener shortlist → new_pick
+    for ticker, series in result.iterrows():
+        rows[ticker] = _base_row(ticker, "new_pick", series)
+
+    # Portfolio positions override (or add if not in screener result)
+    if portfolio_recs is not None and not portfolio_recs.empty:
+        for ticker, series in portfolio_recs.iterrows():
+            raw_rec = str(series.get("recommendation", ""))
+            mapped = _REC_MAP.get(raw_rec)
+            if mapped is None:
+                continue  # DATA_MISSING — skip
+            # Use screener data for metrics if available, else no metrics
+            source = result.loc[ticker] if ticker in result.index else None
+            rows[ticker] = _base_row(ticker, mapped, source)
+
+    if not rows:
+        logger.info("log_monthly_picks: nothing to log for run_date=%s track=%d", run_date, track)
+        return
+
+    cols = ["run_date", "track", "ticker", "universe", "recommendation", "sector"] + _PICKS_FLOAT_COLS
+    placeholders = ", ".join("?" for _ in cols)
+    sql = f"INSERT OR REPLACE INTO monthly_picks ({', '.join(cols)}) VALUES ({placeholders})"
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(_CREATE_MONTHLY_PICKS)
+        conn.executemany(sql, [tuple(r[c] for c in cols) for r in rows.values()])
+        conn.commit()
+
+    logger.info(
+        "log_monthly_picks: %d rows → %s  (run_date=%s track=%d)",
+        len(rows), db_path, run_date, track,
+    )

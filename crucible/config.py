@@ -41,10 +41,10 @@ class ScoreWeights:
 class Track2FilterThresholds:
     """Layer 1 hard-rule thresholds for Track 2 (Growth Inflection)."""
 
-    revenue_growth_min_pct: float = 0.10
+    revenue_growth_min_pct: float = 0.08
     gross_margin_min: float = 0.30
     fcf_positive_last2yr_min: int = 1
-    net_debt_ebitda_max: float = 5.0
+    net_debt_ebitda_soft_max: float = 8.0
 
 
 @dataclass(frozen=True)
@@ -59,6 +59,31 @@ class Track2ScoreWeights:
         total = self.growth_quality + self.momentum + self.valuation
         if abs(total - 1.0) > 1e-9:
             raise ValueError(f"Track2ScoreWeights must sum to 1.0 (got {total})")
+
+
+@dataclass(frozen=True)
+class Track3FilterThresholds:
+    """Layer 1 hard-rule thresholds for Track 3 (Value Recovery)."""
+
+    roic_proxy_min: float = 0.08
+    p_fcf_vs_history_min: float = 1.0    # current P/FCF > 1 std below own 5yr avg
+    fcf_positive_min_years: int = 2      # of last 5 years
+    buyback_signal_min: float = 0.03     # > 3% net reduction in shares outstanding
+    gm_recovery_change_min: float = 0.02  # gross_margin_yr1_change > 2pp
+
+
+@dataclass(frozen=True)
+class Track3ScoreWeights:
+    """Layer 2 composite score weights for Track 3. Must sum to 1.0."""
+
+    value: float = 0.50
+    recovery_signal: float = 0.30
+    balance_sheet: float = 0.20
+
+    def __post_init__(self) -> None:
+        total = self.value + self.recovery_signal + self.balance_sheet
+        if abs(total - 1.0) > 1e-9:
+            raise ValueError(f"Track3ScoreWeights must sum to 1.0 (got {total})")
 
 
 @dataclass(frozen=True)
@@ -92,6 +117,8 @@ class CrucibleConfig:
     fx: FXConfig = field(default_factory=FXConfig)
     track2_filters: Track2FilterThresholds = field(default_factory=Track2FilterThresholds)
     track2_score_weights: Track2ScoreWeights = field(default_factory=Track2ScoreWeights)
+    track3_filters: Track3FilterThresholds = field(default_factory=Track3FilterThresholds)
+    track3_score_weights: Track3ScoreWeights = field(default_factory=Track3ScoreWeights)
 
 
 def load_config() -> CrucibleConfig:

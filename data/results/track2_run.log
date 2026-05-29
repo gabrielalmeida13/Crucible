@@ -1,0 +1,1050 @@
+12:00:19  INFO  Memory monitor started (logs every 10 min)
+12:00:19  INFO  Fetching Russell 1000 tickers …
+12:00:24  WARNING  iShares IWB CSV fetch failed: iShares returned HTML instead of CSV (bot protection active)
+12:00:24  INFO  Russell 1000: 903 tickers from local fallback data/raw/russell1000_tickers.txt
+12:00:24  INFO  903 tickers in universe
+12:00:24  INFO  Fetching prices 2012-01-01 → 2026-06-01 (20 workers) …
+12:00:43  INFO  Prices: 50 / 904 fetched
+12:01:03  INFO  Prices: 100 / 904 fetched
+12:01:21  INFO  Prices: 150 / 904 fetched
+12:01:40  INFO  Prices: 200 / 904 fetched
+12:01:58  INFO  Prices: 250 / 904 fetched
+12:02:17  INFO  Prices: 300 / 904 fetched
+12:02:37  INFO  Prices: 350 / 904 fetched
+12:02:56  INFO  Prices: 400 / 904 fetched
+12:03:16  INFO  Prices: 450 / 904 fetched
+12:03:36  INFO  Prices: 500 / 904 fetched
+12:04:03  INFO  Prices: 550 / 904 fetched
+12:04:28  INFO  Prices: 600 / 904 fetched
+12:04:50  INFO  Prices: 650 / 904 fetched
+12:05:09  INFO  Prices: 700 / 904 fetched
+12:05:28  INFO  Prices: 750 / 904 fetched
+12:05:47  INFO  Prices: 800 / 904 fetched
+12:06:07  INFO  Prices: 850 / 904 fetched
+12:06:32  INFO  Prices: 900 / 904 fetched
+12:06:33  INFO  Prices: 904 / 904 fetched
+12:06:33  INFO  Price matrix: 173 month-end rows × 904 series
+12:06:33  INFO  Building 144 monthly EDGAR snapshots (4 workers) …
+12:10:19  INFO  [mem] RSS 507 MiB
+12:14:53  INFO  Snapshots: 12 / 144 built
+12:20:19  INFO  [mem] RSS 431 MiB
+12:23:19  INFO  Snapshots: 24 / 144 built
+12:30:20  INFO  [mem] RSS 447 MiB
+12:31:40  INFO  Snapshots: 36 / 144 built
+12:40:10  INFO  Snapshots: 48 / 144 built
+12:40:20  INFO  [mem] RSS 455 MiB
+12:48:38  INFO  Snapshots: 60 / 144 built
+12:50:20  INFO  [mem] RSS 458 MiB
+12:57:05  INFO  Snapshots: 72 / 144 built
+13:00:20  INFO  [mem] RSS 469 MiB
+13:05:39  INFO  Snapshots: 84 / 144 built
+13:10:20  INFO  [mem] RSS 473 MiB
+13:14:19  INFO  Snapshots: 96 / 144 built
+13:20:20  INFO  [mem] RSS 478 MiB
+13:23:00  INFO  Snapshots: 108 / 144 built
+13:30:20  INFO  [mem] RSS 485 MiB
+13:31:38  INFO  Snapshots: 120 / 144 built
+13:40:15  INFO  Snapshots: 132 / 144 built
+13:40:20  INFO  [mem] RSS 483 MiB
+13:48:55  INFO  Snapshots: 144 / 144 built
+13:48:55  INFO  Snapshots complete: 144 dates
+13:48:57  INFO  Momentum attached to all snapshots
+13:48:57  INFO  Running Track 2 walk-forward backtest …
+13:48:57  INFO  Walk-forward: 24 training months, 120 test dates  (2015-01-31 → 2024-12-31)
+13:48:57  INFO  track2 apply_filters start: 903 total, 604 with sufficient data
+13:48:57  INFO    rev_growth_10pct       604 →  64
+13:48:57  INFO    rev_acceleration        64 →  31
+13:48:57  INFO    gross_margin            31 →  12
+13:48:57  INFO    fcf_last2yr             12 →   8
+13:48:57  INFO    leverage_soft            8 →   6
+13:48:57  INFO  track2 apply_filters end: 6 companies pass all filters
+13:48:57  INFO  track2 scored 4 companies; top=0.792  bottom=0.467
+13:48:57  INFO  track2 apply_filters start: 903 total, 616 with sufficient data
+13:48:57  INFO    rev_growth_10pct       616 →  69
+13:48:57  INFO    rev_acceleration        69 →  35
+13:48:57  INFO    gross_margin            35 →  15
+13:48:57  INFO    fcf_last2yr             15 →  11
+13:48:57  INFO    leverage_soft           11 →   9
+13:48:57  INFO  track2 apply_filters end: 9 companies pass all filters
+13:48:57  INFO  track2 scored 5 companies; top=0.750  bottom=0.347
+13:48:57  INFO  track2 apply_filters start: 903 total, 621 with sufficient data
+13:48:57  INFO    rev_growth_10pct       621 →  74
+13:48:57  INFO    rev_acceleration        74 →  38
+13:48:57  INFO    gross_margin            38 →  17
+13:48:57  INFO    fcf_last2yr             17 →  12
+13:48:57  INFO    leverage_soft           12 →  10
+13:48:57  INFO  track2 apply_filters end: 10 companies pass all filters
+13:48:57  INFO  track2 scored 7 companies; top=0.781  bottom=0.410
+13:48:57  INFO  track2 apply_filters start: 903 total, 621 with sufficient data
+13:48:57  INFO    rev_growth_10pct       621 →  73
+13:48:57  INFO    rev_acceleration        73 →  37
+13:48:57  INFO    gross_margin            37 →  16
+13:48:57  INFO    fcf_last2yr             16 →  11
+13:48:57  INFO    leverage_soft           11 →   9
+13:48:57  INFO  track2 apply_filters end: 9 companies pass all filters
+13:48:57  INFO  track2 scored 6 companies; top=0.753  bottom=0.422
+13:48:57  INFO  track2 apply_filters start: 903 total, 621 with sufficient data
+13:48:57  INFO    rev_growth_10pct       621 →  71
+13:48:57  INFO    rev_acceleration        71 →  35
+13:48:57  INFO    gross_margin            35 →  14
+13:48:57  INFO    fcf_last2yr             14 →  10
+13:48:57  INFO    leverage_soft           10 →   8
+13:48:57  INFO  track2 apply_filters end: 8 companies pass all filters
+13:48:57  INFO  track2 scored 6 companies; top=0.731  bottom=0.400
+13:48:57  INFO  track2 apply_filters start: 903 total, 622 with sufficient data
+13:48:57  INFO    rev_growth_10pct       622 →  71
+13:48:57  INFO    rev_acceleration        71 →  35
+13:48:57  INFO    gross_margin            35 →  14
+13:48:57  INFO    fcf_last2yr             14 →  10
+13:48:57  INFO    leverage_soft           10 →   8
+13:48:57  INFO  track2 apply_filters end: 8 companies pass all filters
+13:48:57  INFO  track2 scored 6 companies; top=0.806  bottom=0.458
+13:48:57  INFO  track2 apply_filters start: 903 total, 622 with sufficient data
+13:48:57  INFO    rev_growth_10pct       622 →  70
+13:48:57  INFO    rev_acceleration        70 →  36
+13:48:57  INFO    gross_margin            36 →  15
+13:48:57  INFO    fcf_last2yr             15 →  11
+13:48:57  INFO    leverage_soft           11 →   9
+13:48:57  INFO  track2 apply_filters end: 9 companies pass all filters
+13:48:57  INFO  track2 scored 7 companies; top=0.805  bottom=0.357
+13:48:57  INFO  track2 apply_filters start: 903 total, 622 with sufficient data
+13:48:57  INFO    rev_growth_10pct       622 →  71
+13:48:57  INFO    rev_acceleration        71 →  37
+13:48:57  INFO    gross_margin            37 →  16
+13:48:57  INFO    fcf_last2yr             16 →  12
+13:48:57  INFO    leverage_soft           12 →  10
+13:48:57  INFO  track2 apply_filters end: 10 companies pass all filters
+13:48:57  INFO  track2 scored 8 companies; top=0.804  bottom=0.390
+13:48:57  INFO  track2 apply_filters start: 903 total, 623 with sufficient data
+13:48:57  INFO    rev_growth_10pct       623 →  71
+13:48:57  INFO    rev_acceleration        71 →  37
+13:48:57  INFO    gross_margin            37 →  16
+13:48:57  INFO    fcf_last2yr             16 →  12
+13:48:57  INFO    leverage_soft           12 →  10
+13:48:57  INFO  track2 apply_filters end: 10 companies pass all filters
+13:48:57  INFO  track2 scored 7 companies; top=0.805  bottom=0.354
+13:48:57  INFO  track2 apply_filters start: 903 total, 623 with sufficient data
+13:48:57  INFO    rev_growth_10pct       623 →  71
+13:48:57  INFO    rev_acceleration        71 →  37
+13:48:57  INFO    gross_margin            37 →  16
+13:48:57  INFO    fcf_last2yr             16 →  12
+13:48:57  INFO    leverage_soft           12 →  10
+13:48:57  INFO  track2 apply_filters end: 10 companies pass all filters
+13:48:57  INFO  track2 scored 7 companies; top=0.783  bottom=0.409
+13:48:57  INFO  track2 apply_filters start: 903 total, 623 with sufficient data
+13:48:57  INFO    rev_growth_10pct       623 →  71
+13:48:57  INFO    rev_acceleration        71 →  39
+13:48:57  INFO    gross_margin            39 →  17
+13:48:57  INFO    fcf_last2yr             17 →  13
+13:48:57  INFO    leverage_soft           13 →  11
+13:48:57  INFO  track2 apply_filters end: 11 companies pass all filters
+13:48:57  INFO  track2 scored 6 companies; top=0.756  bottom=0.439
+13:48:57  INFO  Progress: 12 / 120 test months
+13:48:57  INFO  track2 apply_filters start: 903 total, 625 with sufficient data
+13:48:57  INFO    rev_growth_10pct       625 →  70
+13:48:57  INFO    rev_acceleration        70 →  38
+13:48:57  INFO    gross_margin            38 →  16
+13:48:57  INFO    fcf_last2yr             16 →  12
+13:48:57  INFO    leverage_soft           12 →  10
+13:48:57  INFO  track2 apply_filters end: 10 companies pass all filters
+13:48:57  INFO  track2 scored 6 companies; top=0.681  bottom=0.386
+13:48:57  INFO  track2 apply_filters start: 903 total, 625 with sufficient data
+13:48:57  INFO    rev_growth_10pct       625 →  70
+13:48:57  INFO    rev_acceleration        70 →  37
+13:48:57  INFO    gross_margin            37 →  16
+13:48:57  INFO    fcf_last2yr             16 →  12
+13:48:57  INFO    leverage_soft           12 →  10
+13:48:57  INFO  track2 apply_filters end: 10 companies pass all filters
+13:48:57  INFO  track2 scored 5 companies; top=0.657  bottom=0.450
+13:48:57  INFO  track2 apply_filters start: 903 total, 632 with sufficient data
+13:48:57  INFO    rev_growth_10pct       632 →  61
+13:48:57  INFO    rev_acceleration        61 →  31
+13:48:57  INFO    gross_margin            31 →  17
+13:48:57  INFO    fcf_last2yr             17 →  13
+13:48:57  INFO    leverage_soft           13 →  12
+13:48:57  INFO  track2 apply_filters end: 12 companies pass all filters
+13:48:57  INFO  track2 scored 5 companies; top=0.710  bottom=0.452
+13:48:57  INFO  track2 apply_filters start: 903 total, 637 with sufficient data
+13:48:57  INFO    rev_growth_10pct       637 →  61
+13:48:57  INFO    rev_acceleration        61 →  33
+13:48:57  INFO    gross_margin            33 →  21
+13:48:57  INFO    fcf_last2yr             21 →  17
+13:48:57  INFO    leverage_soft           17 →  15
+13:48:57  INFO  track2 apply_filters end: 15 companies pass all filters
+13:48:57  INFO  track2 scored 6 companies; top=0.758  bottom=0.406
+13:48:57  INFO  track2 apply_filters start: 903 total, 637 with sufficient data
+13:48:57  INFO    rev_growth_10pct       637 →  61
+13:48:57  INFO    rev_acceleration        61 →  33
+13:48:57  INFO    gross_margin            33 →  21
+13:48:57  INFO    fcf_last2yr             21 →  17
+13:48:57  INFO    leverage_soft           17 →  15
+13:48:57  INFO  track2 apply_filters end: 15 companies pass all filters
+13:48:57  INFO  track2 scored 8 companies; top=0.765  bottom=0.368
+13:48:57  INFO  track2 apply_filters start: 903 total, 637 with sufficient data
+13:48:57  INFO    rev_growth_10pct       637 →  61
+13:48:57  INFO    rev_acceleration        61 →  34
+13:48:57  INFO    gross_margin            34 →  22
+13:48:57  INFO    fcf_last2yr             22 →  18
+13:48:57  INFO    leverage_soft           18 →  16
+13:48:57  INFO  track2 apply_filters end: 16 companies pass all filters
+13:48:57  INFO  track2 scored 8 companies; top=0.691  bottom=0.320
+13:48:57  INFO  track2 apply_filters start: 903 total, 637 with sufficient data
+13:48:57  INFO    rev_growth_10pct       637 →  60
+13:48:57  INFO    rev_acceleration        60 →  34
+13:48:57  INFO    gross_margin            34 →  22
+13:48:57  INFO    fcf_last2yr             22 →  18
+13:48:57  INFO    leverage_soft           18 →  16
+13:48:57  INFO  track2 apply_filters end: 16 companies pass all filters
+13:48:57  INFO  track2 scored 9 companies; top=0.717  bottom=0.322
+13:48:57  INFO  track2 apply_filters start: 903 total, 637 with sufficient data
+13:48:57  INFO    rev_growth_10pct       637 →  59
+13:48:57  INFO    rev_acceleration        59 →  33
+13:48:57  INFO    gross_margin            33 →  21
+13:48:57  INFO    fcf_last2yr             21 →  17
+13:48:57  INFO    leverage_soft           17 →  15
+13:48:57  INFO  track2 apply_filters end: 15 companies pass all filters
+13:48:57  INFO  track2 scored 8 companies; top=0.688  bottom=0.365
+13:48:57  INFO  track2 apply_filters start: 903 total, 640 with sufficient data
+13:48:57  INFO    rev_growth_10pct       640 →  59
+13:48:57  INFO    rev_acceleration        59 →  32
+13:48:57  INFO    gross_margin            32 →  20
+13:48:57  INFO    fcf_last2yr             20 →  16
+13:48:57  INFO    leverage_soft           16 →  14
+13:48:57  INFO  track2 apply_filters end: 14 companies pass all filters
+13:48:57  INFO  track2 scored 10 companies; top=0.747  bottom=0.347
+13:48:57  INFO  track2 apply_filters start: 903 total, 640 with sufficient data
+13:48:57  INFO    rev_growth_10pct       640 →  59
+13:48:57  INFO    rev_acceleration        59 →  32
+13:48:57  INFO    gross_margin            32 →  20
+13:48:57  INFO    fcf_last2yr             20 →  16
+13:48:57  INFO    leverage_soft           16 →  14
+13:48:57  INFO  track2 apply_filters end: 14 companies pass all filters
+13:48:57  INFO  track2 scored 11 companies; top=0.741  bottom=0.347
+13:48:57  INFO  track2 apply_filters start: 903 total, 640 with sufficient data
+13:48:57  INFO    rev_growth_10pct       640 →  59
+13:48:57  INFO    rev_acceleration        59 →  32
+13:48:57  INFO    gross_margin            32 →  20
+13:48:57  INFO    fcf_last2yr             20 →  16
+13:48:57  INFO    leverage_soft           16 →  14
+13:48:57  INFO  track2 apply_filters end: 14 companies pass all filters
+13:48:57  INFO  track2 scored 12 companies; top=0.758  bottom=0.360
+13:48:57  INFO  track2 apply_filters start: 903 total, 641 with sufficient data
+13:48:57  INFO    rev_growth_10pct       641 →  60
+13:48:57  INFO    rev_acceleration        60 →  32
+13:48:57  INFO    gross_margin            32 →  19
+13:48:57  INFO    fcf_last2yr             19 →  15
+13:48:57  INFO    leverage_soft           15 →  13
+13:48:57  INFO  track2 apply_filters end: 13 companies pass all filters
+13:48:57  INFO  track2 scored 8 companies; top=0.769  bottom=0.383
+13:48:57  INFO  Progress: 24 / 120 test months
+13:48:57  INFO  track2 apply_filters start: 903 total, 641 with sufficient data
+13:48:57  INFO    rev_growth_10pct       641 →  60
+13:48:57  INFO    rev_acceleration        60 →  32
+13:48:57  INFO    gross_margin            32 →  19
+13:48:57  INFO    fcf_last2yr             19 →  15
+13:48:57  INFO    leverage_soft           15 →  13
+13:48:57  INFO  track2 apply_filters end: 13 companies pass all filters
+13:48:57  INFO  track2 scored 10 companies; top=0.742  bottom=0.407
+13:48:57  INFO  track2 apply_filters start: 903 total, 641 with sufficient data
+13:48:57  INFO    rev_growth_10pct       641 →  60
+13:48:57  INFO    rev_acceleration        60 →  32
+13:48:57  INFO    gross_margin            32 →  19
+13:48:57  INFO    fcf_last2yr             19 →  15
+13:48:57  INFO    leverage_soft           15 →  13
+13:48:57  INFO  track2 apply_filters end: 13 companies pass all filters
+13:48:57  INFO  track2 scored 11 companies; top=0.842  bottom=0.397
+13:48:57  INFO  track2 apply_filters start: 903 total, 648 with sufficient data
+13:48:57  INFO    rev_growth_10pct       648 →  67
+13:48:57  INFO    rev_acceleration        67 →  33
+13:48:57  INFO    gross_margin            33 →  19
+13:48:57  INFO    fcf_last2yr             19 →  15
+13:48:57  INFO    leverage_soft           15 →  13
+13:48:57  INFO  track2 apply_filters end: 13 companies pass all filters
+13:48:57  INFO  track2 scored 12 companies; top=0.869  bottom=0.369
+13:48:57  INFO  track2 apply_filters start: 903 total, 652 with sufficient data
+13:48:57  INFO    rev_growth_10pct       652 →  68
+13:48:57  INFO    rev_acceleration        68 →  35
+13:48:57  INFO    gross_margin            35 →  21
+13:48:57  INFO    fcf_last2yr             21 →  17
+13:48:57  INFO    leverage_soft           17 →  15
+13:48:57  INFO  track2 apply_filters end: 15 companies pass all filters
+13:48:57  INFO  track2 scored 14 companies; top=0.860  bottom=0.350
+13:48:57  INFO  track2 apply_filters start: 903 total, 652 with sufficient data
+13:48:57  INFO    rev_growth_10pct       652 →  68
+13:48:57  INFO    rev_acceleration        68 →  35
+13:48:57  INFO    gross_margin            35 →  21
+13:48:57  INFO    fcf_last2yr             21 →  17
+13:48:57  INFO    leverage_soft           17 →  15
+13:48:57  INFO  track2 apply_filters end: 15 companies pass all filters
+13:48:57  INFO  track2 scored 13 companies; top=0.814  bottom=0.364
+13:48:57  INFO  track2 apply_filters start: 903 total, 652 with sufficient data
+13:48:57  INFO    rev_growth_10pct       652 →  69
+13:48:57  INFO    rev_acceleration        69 →  36
+13:48:57  INFO    gross_margin            36 →  22
+13:48:57  INFO    fcf_last2yr             22 →  18
+13:48:57  INFO    leverage_soft           18 →  16
+13:48:57  INFO  track2 apply_filters end: 16 companies pass all filters
+13:48:57  INFO  track2 scored 15 companies; top=0.701  bottom=0.338
+13:48:57  INFO  track2 apply_filters start: 903 total, 652 with sufficient data
+13:48:57  INFO    rev_growth_10pct       652 →  69
+13:48:57  INFO    rev_acceleration        69 →  36
+13:48:57  INFO    gross_margin            36 →  22
+13:48:57  INFO    fcf_last2yr             22 →  18
+13:48:57  INFO    leverage_soft           18 →  16
+13:48:57  INFO  track2 apply_filters end: 16 companies pass all filters
+13:48:57  INFO  track2 scored 12 companies; top=0.726  bottom=0.354
+13:48:57  INFO  track2 apply_filters start: 903 total, 652 with sufficient data
+13:48:57  INFO    rev_growth_10pct       652 →  69
+13:48:57  INFO    rev_acceleration        69 →  36
+13:48:57  INFO    gross_margin            36 →  22
+13:48:57  INFO    fcf_last2yr             22 →  18
+13:48:57  INFO    leverage_soft           18 →  16
+13:48:57  INFO  track2 apply_filters end: 16 companies pass all filters
+13:48:57  INFO  track2 scored 12 companies; top=0.739  bottom=0.326
+13:48:57  INFO  track2 apply_filters start: 903 total, 652 with sufficient data
+13:48:57  INFO    rev_growth_10pct       652 →  70
+13:48:57  INFO    rev_acceleration        70 →  37
+13:48:57  INFO    gross_margin            37 →  23
+13:48:57  INFO    fcf_last2yr             23 →  19
+13:48:57  INFO    leverage_soft           19 →  17
+13:48:57  INFO  track2 apply_filters end: 17 companies pass all filters
+13:48:57  INFO  track2 scored 12 companies; top=0.792  bottom=0.338
+13:48:57  INFO  track2 apply_filters start: 903 total, 653 with sufficient data
+13:48:57  INFO    rev_growth_10pct       653 →  70
+13:48:57  INFO    rev_acceleration        70 →  39
+13:48:57  INFO    gross_margin            39 →  24
+13:48:57  INFO    fcf_last2yr             24 →  20
+13:48:57  INFO    leverage_soft           20 →  18
+13:48:57  INFO  track2 apply_filters end: 18 companies pass all filters
+13:48:57  INFO  track2 scored 12 companies; top=0.778  bottom=0.404
+13:48:57  INFO  track2 apply_filters start: 903 total, 653 with sufficient data
+13:48:57  INFO    rev_growth_10pct       653 →  70
+13:48:57  INFO    rev_acceleration        70 →  39
+13:48:57  INFO    gross_margin            39 →  24
+13:48:57  INFO    fcf_last2yr             24 →  20
+13:48:57  INFO    leverage_soft           20 →  18
+13:48:57  INFO  track2 apply_filters end: 18 companies pass all filters
+13:48:57  INFO  track2 scored 15 companies; top=0.860  bottom=0.344
+13:48:57  INFO  track2 apply_filters start: 903 total, 654 with sufficient data
+13:48:57  INFO    rev_growth_10pct       654 →  70
+13:48:57  INFO    rev_acceleration        70 →  39
+13:48:57  INFO    gross_margin            39 →  24
+13:48:57  INFO    fcf_last2yr             24 →  20
+13:48:57  INFO    leverage_soft           20 →  18
+13:48:57  INFO  track2 apply_filters end: 18 companies pass all filters
+13:48:57  INFO  track2 scored 14 companies; top=0.770  bottom=0.340
+13:48:57  INFO  Progress: 36 / 120 test months
+13:48:57  INFO  track2 apply_filters start: 903 total, 654 with sufficient data
+13:48:57  INFO    rev_growth_10pct       654 →  71
+13:48:57  INFO    rev_acceleration        71 →  40
+13:48:57  INFO    gross_margin            40 →  25
+13:48:57  INFO    fcf_last2yr             25 →  21
+13:48:57  INFO    leverage_soft           21 →  19
+13:48:57  INFO  track2 apply_filters end: 19 companies pass all filters
+13:48:57  INFO  track2 scored 15 companies; top=0.830  bottom=0.393
+13:48:57  INFO  track2 apply_filters start: 903 total, 654 with sufficient data
+13:48:57  INFO    rev_growth_10pct       654 →  71
+13:48:57  INFO    rev_acceleration        71 →  40
+13:48:57  INFO    gross_margin            40 →  25
+13:48:57  INFO    fcf_last2yr             25 →  21
+13:48:57  INFO    leverage_soft           21 →  19
+13:48:57  INFO  track2 apply_filters end: 19 companies pass all filters
+13:48:57  INFO  track2 scored 16 companies; top=0.819  bottom=0.389
+13:48:57  INFO  track2 apply_filters start: 903 total, 661 with sufficient data
+13:48:57  INFO    rev_growth_10pct       661 →  75
+13:48:57  INFO    rev_acceleration        75 →  47
+13:48:57  INFO    gross_margin            47 →  27
+13:48:57  INFO    fcf_last2yr             27 →  22
+13:48:57  INFO    leverage_soft           22 →  20
+13:48:57  INFO  track2 apply_filters end: 20 companies pass all filters
+13:48:57  INFO  track2 scored 19 companies; top=0.833  bottom=0.346
+13:48:57  INFO  track2 apply_filters start: 903 total, 666 with sufficient data
+13:48:57  INFO    rev_growth_10pct       666 →  77
+13:48:57  INFO    rev_acceleration        77 →  49
+13:48:57  INFO    gross_margin            49 →  28
+13:48:57  INFO    fcf_last2yr             28 →  22
+13:48:57  INFO    leverage_soft           22 →  21
+13:48:57  INFO  track2 apply_filters end: 21 companies pass all filters
+13:48:57  INFO  track2 scored 18 companies; top=0.867  bottom=0.263
+13:48:57  INFO  track2 apply_filters start: 903 total, 666 with sufficient data
+13:48:57  INFO    rev_growth_10pct       666 →  77
+13:48:57  INFO    rev_acceleration        77 →  49
+13:48:57  INFO    gross_margin            49 →  28
+13:48:57  INFO    fcf_last2yr             28 →  22
+13:48:57  INFO    leverage_soft           22 →  22
+13:48:57  INFO  track2 apply_filters end: 22 companies pass all filters
+13:48:57  INFO  track2 scored 16 companies; top=0.851  bottom=0.275
+13:48:57  INFO  track2 apply_filters start: 903 total, 667 with sufficient data
+13:48:57  INFO    rev_growth_10pct       667 →  77
+13:48:57  INFO    rev_acceleration        77 →  49
+13:48:57  INFO    gross_margin            49 →  28
+13:48:57  INFO    fcf_last2yr             28 →  21
+13:48:57  INFO    leverage_soft           21 →  21
+13:48:57  INFO  track2 apply_filters end: 21 companies pass all filters
+13:48:57  INFO  track2 scored 18 companies; top=0.768  bottom=0.275
+13:48:57  INFO  track2 apply_filters start: 903 total, 667 with sufficient data
+13:48:57  INFO    rev_growth_10pct       667 →  77
+13:48:57  INFO    rev_acceleration        77 →  49
+13:48:57  INFO    gross_margin            49 →  28
+13:48:57  INFO    fcf_last2yr             28 →  21
+13:48:57  INFO    leverage_soft           21 →  21
+13:48:57  INFO  track2 apply_filters end: 21 companies pass all filters
+13:48:57  INFO  track2 scored 16 companies; top=0.771  bottom=0.310
+13:48:57  INFO  track2 apply_filters start: 903 total, 667 with sufficient data
+13:48:57  INFO    rev_growth_10pct       667 →  77
+13:48:57  INFO    rev_acceleration        77 →  49
+13:48:57  INFO    gross_margin            49 →  28
+13:48:57  INFO    fcf_last2yr             28 →  21
+13:48:57  INFO    leverage_soft           21 →  21
+13:48:57  INFO  track2 apply_filters end: 21 companies pass all filters
+13:48:57  INFO  track2 scored 15 companies; top=0.831  bottom=0.287
+13:48:57  INFO  track2 apply_filters start: 903 total, 667 with sufficient data
+13:48:57  INFO    rev_growth_10pct       667 →  76
+13:48:57  INFO    rev_acceleration        76 →  49
+13:48:57  INFO    gross_margin            49 →  28
+13:48:57  INFO    fcf_last2yr             28 →  21
+13:48:57  INFO    leverage_soft           21 →  21
+13:48:57  INFO  track2 apply_filters end: 21 companies pass all filters
+13:48:57  INFO  track2 scored 16 companies; top=0.783  bottom=0.265
+13:48:57  INFO  track2 apply_filters start: 903 total, 668 with sufficient data
+13:48:57  INFO    rev_growth_10pct       668 →  77
+13:48:57  INFO    rev_acceleration        77 →  49
+13:48:57  INFO    gross_margin            49 →  28
+13:48:57  INFO    fcf_last2yr             28 →  21
+13:48:57  INFO    leverage_soft           21 →  21
+13:48:57  INFO  track2 apply_filters end: 21 companies pass all filters
+13:48:57  INFO  track2 scored 16 companies; top=0.812  bottom=0.280
+13:48:57  INFO  track2 apply_filters start: 903 total, 670 with sufficient data
+13:48:57  INFO    rev_growth_10pct       670 →  77
+13:48:57  INFO    rev_acceleration        77 →  49
+13:48:57  INFO    gross_margin            49 →  28
+13:48:57  INFO    fcf_last2yr             28 →  21
+13:48:57  INFO    leverage_soft           21 →  21
+13:48:57  INFO  track2 apply_filters end: 21 companies pass all filters
+13:48:57  INFO  track2 scored 15 companies; top=0.810  bottom=0.299
+13:48:57  INFO  track2 apply_filters start: 903 total, 673 with sufficient data
+13:48:57  INFO    rev_growth_10pct       673 →  78
+13:48:57  INFO    rev_acceleration        78 →  49
+13:48:57  INFO    gross_margin            49 →  28
+13:48:57  INFO    fcf_last2yr             28 →  21
+13:48:57  INFO    leverage_soft           21 →  21
+13:48:57  INFO  track2 apply_filters end: 21 companies pass all filters
+13:48:57  INFO  track2 scored 13 companies; top=0.777  bottom=0.317
+13:48:57  INFO  Progress: 48 / 120 test months
+13:48:57  INFO  track2 apply_filters start: 903 total, 674 with sufficient data
+13:48:57  INFO    rev_growth_10pct       674 →  79
+13:48:57  INFO    rev_acceleration        79 →  50
+13:48:57  INFO    gross_margin            50 →  28
+13:48:57  INFO    fcf_last2yr             28 →  21
+13:48:57  INFO    leverage_soft           21 →  21
+13:48:57  INFO  track2 apply_filters end: 21 companies pass all filters
+13:48:57  INFO  track2 scored 13 companies; top=0.778  bottom=0.324
+13:48:57  INFO  track2 apply_filters start: 903 total, 674 with sufficient data
+13:48:57  INFO    rev_growth_10pct       674 →  81
+13:48:57  INFO    rev_acceleration        81 →  51
+13:48:57  INFO    gross_margin            51 →  28
+13:48:57  INFO    fcf_last2yr             28 →  20
+13:48:57  INFO    leverage_soft           20 →  20
+13:48:57  INFO  track2 apply_filters end: 20 companies pass all filters
+13:48:57  INFO  track2 scored 10 companies; top=0.681  bottom=0.400
+13:48:57  INFO  track2 apply_filters start: 903 total, 724 with sufficient data
+13:48:57  INFO    rev_growth_10pct       724 →  94
+13:48:57  INFO    rev_acceleration        94 →  58
+13:48:57  INFO    gross_margin            58 →  25
+13:48:57  INFO    fcf_last2yr             25 →  16
+13:48:57  INFO    leverage_soft           16 →  16
+13:48:57  INFO  track2 apply_filters end: 16 companies pass all filters
+13:48:57  INFO  track2 scored 10 companies; top=0.731  bottom=0.402
+13:48:57  INFO  track2 apply_filters start: 903 total, 744 with sufficient data
+13:48:57  INFO    rev_growth_10pct       744 → 101
+13:48:57  INFO    rev_acceleration       101 →  59
+13:48:57  INFO    gross_margin            59 →  24
+13:48:57  INFO    fcf_last2yr             24 →  15
+13:48:57  INFO    leverage_soft           15 →  15
+13:48:57  INFO  track2 apply_filters end: 15 companies pass all filters
+13:48:57  INFO  track2 scored 10 companies; top=0.708  bottom=0.389
+13:48:58  INFO  track2 apply_filters start: 903 total, 747 with sufficient data
+13:48:58  INFO    rev_growth_10pct       747 → 101
+13:48:58  INFO    rev_acceleration       101 →  58
+13:48:58  INFO    gross_margin            58 →  23
+13:48:58  INFO    fcf_last2yr             23 →  14
+13:48:58  INFO    leverage_soft           14 →  14
+13:48:58  INFO  track2 apply_filters end: 14 companies pass all filters
+13:48:58  INFO  track2 scored 8 companies; top=0.661  bottom=0.410
+13:48:58  INFO  track2 apply_filters start: 903 total, 752 with sufficient data
+13:48:58  INFO    rev_growth_10pct       752 → 101
+13:48:58  INFO    rev_acceleration       101 →  57
+13:48:58  INFO    gross_margin            57 →  21
+13:48:58  INFO    fcf_last2yr             21 →  13
+13:48:58  INFO    leverage_soft           13 →  13
+13:48:58  INFO  track2 apply_filters end: 13 companies pass all filters
+13:48:58  INFO  track2 scored 9 companies; top=0.652  bottom=0.374
+13:48:58  INFO  track2 apply_filters start: 903 total, 754 with sufficient data
+13:48:58  INFO    rev_growth_10pct       754 → 100
+13:48:58  INFO    rev_acceleration       100 →  56
+13:48:58  INFO    gross_margin            56 →  20
+13:48:58  INFO    fcf_last2yr             20 →  12
+13:48:58  INFO    leverage_soft           12 →  12
+13:48:58  INFO  track2 apply_filters end: 12 companies pass all filters
+13:48:58  INFO  track2 scored 6 companies; top=0.697  bottom=0.294
+13:48:58  INFO  track2 apply_filters start: 903 total, 754 with sufficient data
+13:48:58  INFO    rev_growth_10pct       754 → 100
+13:48:58  INFO    rev_acceleration       100 →  56
+13:48:58  INFO    gross_margin            56 →  20
+13:48:58  INFO    fcf_last2yr             20 →  12
+13:48:58  INFO    leverage_soft           12 →  12
+13:48:58  INFO  track2 apply_filters end: 12 companies pass all filters
+13:48:58  INFO  track2 scored 8 companies; top=0.721  bottom=0.365
+13:48:58  INFO  track2 apply_filters start: 903 total, 759 with sufficient data
+13:48:58  INFO    rev_growth_10pct       759 → 102
+13:48:58  INFO    rev_acceleration       102 →  56
+13:48:58  INFO    gross_margin            56 →  19
+13:48:58  INFO    fcf_last2yr             19 →  11
+13:48:58  INFO    leverage_soft           11 →  11
+13:48:58  INFO  track2 apply_filters end: 11 companies pass all filters
+13:48:58  INFO  track2 scored 7 companies; top=0.681  bottom=0.335
+13:48:58  INFO  track2 apply_filters start: 903 total, 761 with sufficient data
+13:48:58  INFO    rev_growth_10pct       761 → 102
+13:48:58  INFO    rev_acceleration       102 →  56
+13:48:58  INFO    gross_margin            56 →  19
+13:48:58  INFO    fcf_last2yr             19 →  11
+13:48:58  INFO    leverage_soft           11 →  11
+13:48:58  INFO  track2 apply_filters end: 11 companies pass all filters
+13:48:58  INFO  track2 scored 6 companies; top=0.708  bottom=0.421
+13:48:58  INFO  track2 apply_filters start: 903 total, 761 with sufficient data
+13:48:58  INFO    rev_growth_10pct       761 → 103
+13:48:58  INFO    rev_acceleration       103 →  57
+13:48:58  INFO    gross_margin            57 →  19
+13:48:58  INFO    fcf_last2yr             19 →  11
+13:48:58  INFO    leverage_soft           11 →  11
+13:48:58  INFO  track2 apply_filters end: 11 companies pass all filters
+13:48:58  INFO  track2 scored 9 companies; top=0.733  bottom=0.336
+13:48:58  INFO  track2 apply_filters start: 903 total, 763 with sufficient data
+13:48:58  INFO    rev_growth_10pct       763 → 102
+13:48:58  INFO    rev_acceleration       102 →  56
+13:48:58  INFO    gross_margin            56 →  20
+13:48:58  INFO    fcf_last2yr             20 →  12
+13:48:58  INFO    leverage_soft           12 →  12
+13:48:58  INFO  track2 apply_filters end: 12 companies pass all filters
+13:48:58  INFO  track2 scored 9 companies; top=0.842  bottom=0.325
+13:48:58  INFO  Progress: 60 / 120 test months
+13:48:58  INFO  track2 apply_filters start: 903 total, 762 with sufficient data
+13:48:58  INFO    rev_growth_10pct       762 → 102
+13:48:58  INFO    rev_acceleration       102 →  56
+13:48:58  INFO    gross_margin            56 →  20
+13:48:58  INFO    fcf_last2yr             20 →  12
+13:48:58  INFO    leverage_soft           12 →  12
+13:48:58  INFO  track2 apply_filters end: 12 companies pass all filters
+13:48:58  INFO  track2 scored 10 companies; top=0.903  bottom=0.307
+13:48:58  INFO  track2 apply_filters start: 903 total, 762 with sufficient data
+13:48:58  INFO    rev_growth_10pct       762 → 100
+13:48:58  INFO    rev_acceleration       100 →  54
+13:48:58  INFO    gross_margin            54 →  19
+13:48:58  INFO    fcf_last2yr             19 →  12
+13:48:58  INFO    leverage_soft           12 →  12
+13:48:58  INFO  track2 apply_filters end: 12 companies pass all filters
+13:48:58  INFO  track2 scored 11 companies; top=0.895  bottom=0.302
+13:48:58  INFO  track2 apply_filters start: 903 total, 783 with sufficient data
+13:48:58  INFO    rev_growth_10pct       783 →  87
+13:48:58  INFO    rev_acceleration        87 →  45
+13:48:58  INFO    gross_margin            45 →  18
+13:48:58  INFO    fcf_last2yr             18 →  13
+13:48:58  INFO    leverage_soft           13 →  13
+13:48:58  INFO  track2 apply_filters end: 13 companies pass all filters
+13:48:58  INFO  track2 scored 8 companies; top=0.897  bottom=0.394
+13:48:58  INFO  track2 apply_filters start: 903 total, 786 with sufficient data
+13:48:58  INFO    rev_growth_10pct       786 →  89
+13:48:58  INFO    rev_acceleration        89 →  46
+13:48:58  INFO    gross_margin            46 →  21
+13:48:58  INFO    fcf_last2yr             21 →  17
+13:48:58  INFO    leverage_soft           17 →  16
+13:48:58  INFO  track2 apply_filters end: 16 companies pass all filters
+13:48:58  INFO  track2 scored 10 companies; top=0.865  bottom=0.351
+13:48:58  INFO  track2 apply_filters start: 903 total, 787 with sufficient data
+13:48:58  INFO    rev_growth_10pct       787 →  89
+13:48:58  INFO    rev_acceleration        89 →  46
+13:48:58  INFO    gross_margin            46 →  21
+13:48:58  INFO    fcf_last2yr             21 →  17
+13:48:58  INFO    leverage_soft           17 →  16
+13:48:58  INFO  track2 apply_filters end: 16 companies pass all filters
+13:48:58  INFO  track2 scored 6 companies; top=0.867  bottom=0.334
+13:48:58  INFO  track2 apply_filters start: 903 total, 788 with sufficient data
+13:48:58  INFO    rev_growth_10pct       788 →  91
+13:48:58  INFO    rev_acceleration        91 →  47
+13:48:58  INFO    gross_margin            47 →  22
+13:48:58  INFO    fcf_last2yr             22 →  18
+13:48:58  INFO    leverage_soft           18 →  17
+13:48:58  INFO  track2 apply_filters end: 17 companies pass all filters
+13:48:58  INFO  track2 scored 12 companies; top=0.848  bottom=0.347
+13:48:58  INFO  track2 apply_filters start: 903 total, 788 with sufficient data
+13:48:58  INFO    rev_growth_10pct       788 →  91
+13:48:58  INFO    rev_acceleration        91 →  47
+13:48:58  INFO    gross_margin            47 →  22
+13:48:58  INFO    fcf_last2yr             22 →  18
+13:48:58  INFO    leverage_soft           18 →  17
+13:48:58  INFO  track2 apply_filters end: 17 companies pass all filters
+13:48:58  INFO  track2 scored 12 companies; top=0.796  bottom=0.308
+13:48:58  INFO  track2 apply_filters start: 903 total, 788 with sufficient data
+13:48:58  INFO    rev_growth_10pct       788 →  91
+13:48:58  INFO    rev_acceleration        91 →  47
+13:48:58  INFO    gross_margin            47 →  22
+13:48:58  INFO    fcf_last2yr             22 →  18
+13:48:58  INFO    leverage_soft           18 →  17
+13:48:58  INFO  track2 apply_filters end: 17 companies pass all filters
+13:48:58  INFO  track2 scored 12 companies; top=0.796  bottom=0.325
+13:48:58  INFO  track2 apply_filters start: 903 total, 789 with sufficient data
+13:48:58  INFO    rev_growth_10pct       789 →  90
+13:48:58  INFO    rev_acceleration        90 →  48
+13:48:58  INFO    gross_margin            48 →  23
+13:48:58  INFO    fcf_last2yr             23 →  19
+13:48:58  INFO    leverage_soft           19 →  18
+13:48:58  INFO  track2 apply_filters end: 18 companies pass all filters
+13:48:58  INFO  track2 scored 14 companies; top=0.847  bottom=0.313
+13:48:58  INFO  track2 apply_filters start: 903 total, 789 with sufficient data
+13:48:58  INFO    rev_growth_10pct       789 →  90
+13:48:58  INFO    rev_acceleration        90 →  48
+13:48:58  INFO    gross_margin            48 →  23
+13:48:58  INFO    fcf_last2yr             23 →  19
+13:48:58  INFO    leverage_soft           19 →  18
+13:48:58  INFO  track2 apply_filters end: 18 companies pass all filters
+13:48:58  INFO  track2 scored 15 companies; top=0.836  bottom=0.333
+13:48:58  INFO  track2 apply_filters start: 903 total, 789 with sufficient data
+13:48:58  INFO    rev_growth_10pct       789 →  89
+13:48:58  INFO    rev_acceleration        89 →  47
+13:48:58  INFO    gross_margin            47 →  23
+13:48:58  INFO    fcf_last2yr             23 →  19
+13:48:58  INFO    leverage_soft           19 →  18
+13:48:58  INFO  track2 apply_filters end: 18 companies pass all filters
+13:48:58  INFO  track2 scored 14 companies; top=0.858  bottom=0.330
+13:48:58  INFO  track2 apply_filters start: 903 total, 790 with sufficient data
+13:48:58  INFO    rev_growth_10pct       790 →  85
+13:48:58  INFO    rev_acceleration        85 →  45
+13:48:58  INFO    gross_margin            45 →  22
+13:48:58  INFO    fcf_last2yr             22 →  18
+13:48:58  INFO    leverage_soft           18 →  17
+13:48:58  INFO  track2 apply_filters end: 17 companies pass all filters
+13:48:58  INFO  track2 scored 13 companies; top=0.851  bottom=0.360
+13:48:58  INFO  Progress: 72 / 120 test months
+13:48:58  INFO  track2 apply_filters start: 903 total, 790 with sufficient data
+13:48:58  INFO    rev_growth_10pct       790 →  84
+13:48:58  INFO    rev_acceleration        84 →  44
+13:48:58  INFO    gross_margin            44 →  21
+13:48:58  INFO    fcf_last2yr             21 →  17
+13:48:58  INFO    leverage_soft           17 →  16
+13:48:58  INFO  track2 apply_filters end: 16 companies pass all filters
+13:48:58  INFO  track2 scored 12 companies; top=0.764  bottom=0.325
+13:48:58  INFO  track2 apply_filters start: 903 total, 790 with sufficient data
+13:48:58  INFO    rev_growth_10pct       790 →  84
+13:48:58  INFO    rev_acceleration        84 →  44
+13:48:58  INFO    gross_margin            44 →  21
+13:48:58  INFO    fcf_last2yr             21 →  17
+13:48:58  INFO    leverage_soft           17 →  16
+13:48:58  INFO  track2 apply_filters end: 16 companies pass all filters
+13:48:58  INFO  track2 scored 12 companies; top=0.751  bottom=0.292
+13:48:58  INFO  track2 apply_filters start: 903 total, 803 with sufficient data
+13:48:58  INFO    rev_growth_10pct       803 →  93
+13:48:58  INFO    rev_acceleration        93 →  50
+13:48:58  INFO    gross_margin            50 →  26
+13:48:58  INFO    fcf_last2yr             26 →  23
+13:48:58  INFO    leverage_soft           23 →  22
+13:48:58  INFO  track2 apply_filters end: 22 companies pass all filters
+13:48:58  INFO  track2 scored 20 companies; top=0.735  bottom=0.268
+13:48:58  INFO  track2 apply_filters start: 903 total, 808 with sufficient data
+13:48:58  INFO    rev_growth_10pct       808 →  95
+13:48:58  INFO    rev_acceleration        95 →  53
+13:48:58  INFO    gross_margin            53 →  28
+13:48:58  INFO    fcf_last2yr             28 →  25
+13:48:58  INFO    leverage_soft           25 →  25
+13:48:58  INFO  track2 apply_filters end: 25 companies pass all filters
+13:48:58  INFO  track2 scored 25 companies; top=0.839  bottom=0.235
+13:48:58  INFO  track2 apply_filters start: 903 total, 808 with sufficient data
+13:48:58  INFO    rev_growth_10pct       808 →  95
+13:48:58  INFO    rev_acceleration        95 →  53
+13:48:58  INFO    gross_margin            53 →  28
+13:48:58  INFO    fcf_last2yr             28 →  25
+13:48:58  INFO    leverage_soft           25 →  25
+13:48:58  INFO  track2 apply_filters end: 25 companies pass all filters
+13:48:58  INFO  track2 scored 23 companies; top=0.787  bottom=0.246
+13:48:58  INFO  track2 apply_filters start: 903 total, 809 with sufficient data
+13:48:58  INFO    rev_growth_10pct       809 →  97
+13:48:58  INFO    rev_acceleration        97 →  55
+13:48:58  INFO    gross_margin            55 →  30
+13:48:58  INFO    fcf_last2yr             30 →  27
+13:48:58  INFO    leverage_soft           27 →  27
+13:48:58  INFO  track2 apply_filters end: 27 companies pass all filters
+13:48:58  INFO  track2 scored 24 companies; top=0.817  bottom=0.242
+13:48:58  INFO  track2 apply_filters start: 903 total, 809 with sufficient data
+13:48:58  INFO    rev_growth_10pct       809 →  97
+13:48:58  INFO    rev_acceleration        97 →  55
+13:48:58  INFO    gross_margin            55 →  30
+13:48:58  INFO    fcf_last2yr             30 →  27
+13:48:58  INFO    leverage_soft           27 →  27
+13:48:58  INFO  track2 apply_filters end: 27 companies pass all filters
+13:48:58  INFO  track2 scored 23 companies; top=0.812  bottom=0.228
+13:48:58  INFO  track2 apply_filters start: 903 total, 809 with sufficient data
+13:48:58  INFO    rev_growth_10pct       809 →  97
+13:48:58  INFO    rev_acceleration        97 →  55
+13:48:58  INFO    gross_margin            55 →  30
+13:48:58  INFO    fcf_last2yr             30 →  27
+13:48:58  INFO    leverage_soft           27 →  27
+13:48:58  INFO  track2 apply_filters end: 27 companies pass all filters
+13:48:58  INFO  track2 scored 22 companies; top=0.806  bottom=0.296
+13:48:58  INFO  track2 apply_filters start: 903 total, 809 with sufficient data
+13:48:58  INFO    rev_growth_10pct       809 → 100
+13:48:58  INFO    rev_acceleration       100 →  56
+13:48:58  INFO    gross_margin            56 →  32
+13:48:58  INFO    fcf_last2yr             32 →  28
+13:48:58  INFO    leverage_soft           28 →  28
+13:48:58  INFO  track2 apply_filters end: 28 companies pass all filters
+13:48:58  INFO  track2 scored 22 companies; top=0.730  bottom=0.372
+13:48:58  INFO  track2 apply_filters start: 903 total, 809 with sufficient data
+13:48:58  INFO    rev_growth_10pct       809 → 101
+13:48:58  INFO    rev_acceleration       101 →  57
+13:48:58  INFO    gross_margin            57 →  32
+13:48:58  INFO    fcf_last2yr             32 →  28
+13:48:58  INFO    leverage_soft           28 →  28
+13:48:58  INFO  track2 apply_filters end: 28 companies pass all filters
+13:48:58  INFO  track2 scored 24 companies; top=0.758  bottom=0.243
+13:48:58  INFO  track2 apply_filters start: 903 total, 809 with sufficient data
+13:48:58  INFO    rev_growth_10pct       809 → 102
+13:48:58  INFO    rev_acceleration       102 →  58
+13:48:58  INFO    gross_margin            58 →  32
+13:48:58  INFO    fcf_last2yr             32 →  28
+13:48:58  INFO    leverage_soft           28 →  28
+13:48:58  INFO  track2 apply_filters end: 28 companies pass all filters
+13:48:58  INFO  track2 scored 25 companies; top=0.748  bottom=0.306
+13:48:58  INFO  track2 apply_filters start: 903 total, 810 with sufficient data
+13:48:58  INFO    rev_growth_10pct       810 → 105
+13:48:58  INFO    rev_acceleration       105 →  61
+13:48:58  INFO    gross_margin            61 →  34
+13:48:58  INFO    fcf_last2yr             34 →  29
+13:48:58  INFO    leverage_soft           29 →  29
+13:48:58  INFO  track2 apply_filters end: 29 companies pass all filters
+13:48:58  INFO  track2 scored 25 companies; top=0.785  bottom=0.279
+13:48:58  INFO  Progress: 84 / 120 test months
+13:48:58  INFO  track2 apply_filters start: 903 total, 811 with sufficient data
+13:48:58  INFO    rev_growth_10pct       811 → 106
+13:48:58  INFO    rev_acceleration       106 →  62
+13:48:58  INFO    gross_margin            62 →  35
+13:48:58  INFO    fcf_last2yr             35 →  30
+13:48:58  INFO    leverage_soft           30 →  30
+13:48:58  INFO  track2 apply_filters end: 30 companies pass all filters
+13:48:58  INFO  track2 scored 23 companies; top=0.775  bottom=0.300
+13:48:58  INFO  track2 apply_filters start: 903 total, 812 with sufficient data
+13:48:58  INFO    rev_growth_10pct       812 → 109
+13:48:58  INFO    rev_acceleration       109 →  63
+13:48:58  INFO    gross_margin            63 →  35
+13:48:58  INFO    fcf_last2yr             35 →  30
+13:48:58  INFO    leverage_soft           30 →  30
+13:48:58  INFO  track2 apply_filters end: 30 companies pass all filters
+13:48:58  INFO  track2 scored 20 companies; top=0.770  bottom=0.193
+13:48:58  INFO  track2 apply_filters start: 903 total, 822 with sufficient data
+13:48:58  INFO    rev_growth_10pct       822 → 153
+13:48:58  INFO    rev_acceleration       153 → 100
+13:48:58  INFO    gross_margin           100 →  52
+13:48:58  INFO    fcf_last2yr             52 →  44
+13:48:58  INFO    leverage_soft           44 →  43
+13:48:58  INFO  track2 apply_filters end: 43 companies pass all filters
+13:48:58  INFO  track2 scored 25 companies; top=0.860  bottom=0.199
+13:48:58  INFO  track2 apply_filters start: 903 total, 828 with sufficient data
+13:48:58  INFO    rev_growth_10pct       828 → 165
+13:48:58  INFO    rev_acceleration       165 → 112
+13:48:58  INFO    gross_margin           112 →  61
+13:48:58  INFO    fcf_last2yr             61 →  54
+13:48:58  INFO    leverage_soft           54 →  51
+13:48:58  INFO  track2 apply_filters end: 51 companies pass all filters
+13:48:58  INFO  track2 scored 29 companies; top=0.849  bottom=0.266
+13:48:58  INFO  track2 apply_filters start: 903 total, 829 with sufficient data
+13:48:58  INFO    rev_growth_10pct       829 → 166
+13:48:58  INFO    rev_acceleration       166 → 112
+13:48:58  INFO    gross_margin           112 →  61
+13:48:58  INFO    fcf_last2yr             61 →  54
+13:48:58  INFO    leverage_soft           54 →  51
+13:48:58  INFO  track2 apply_filters end: 51 companies pass all filters
+13:48:58  INFO  track2 scored 21 companies; top=0.756  bottom=0.271
+13:48:58  INFO  track2 apply_filters start: 903 total, 831 with sufficient data
+13:48:58  INFO    rev_growth_10pct       831 → 167
+13:48:58  INFO    rev_acceleration       167 → 112
+13:48:58  INFO    gross_margin           112 →  61
+13:48:58  INFO    fcf_last2yr             61 →  54
+13:48:58  INFO    leverage_soft           54 →  51
+13:48:58  INFO  track2 apply_filters end: 51 companies pass all filters
+13:48:58  INFO  track2 scored 17 companies; top=0.734  bottom=0.243
+13:48:58  INFO  track2 apply_filters start: 903 total, 831 with sufficient data
+13:48:58  INFO    rev_growth_10pct       831 → 167
+13:48:58  INFO    rev_acceleration       167 → 112
+13:48:58  INFO    gross_margin           112 →  61
+13:48:58  INFO    fcf_last2yr             61 →  54
+13:48:58  INFO    leverage_soft           54 →  51
+13:48:58  INFO  track2 apply_filters end: 51 companies pass all filters
+13:48:58  INFO  track2 scored 18 companies; top=0.772  bottom=0.326
+13:48:58  INFO  track2 apply_filters start: 903 total, 831 with sufficient data
+13:48:58  INFO    rev_growth_10pct       831 → 167
+13:48:58  INFO    rev_acceleration       167 → 112
+13:48:58  INFO    gross_margin           112 →  61
+13:48:58  INFO    fcf_last2yr             61 →  54
+13:48:58  INFO    leverage_soft           54 →  51
+13:48:58  INFO  track2 apply_filters end: 51 companies pass all filters
+13:48:58  INFO  track2 scored 8 companies; top=0.754  bottom=0.290
+13:48:58  INFO  track2 apply_filters start: 903 total, 831 with sufficient data
+13:48:58  INFO    rev_growth_10pct       831 → 173
+13:48:58  INFO    rev_acceleration       173 → 120
+13:48:58  INFO    gross_margin           120 →  67
+13:48:58  INFO    fcf_last2yr             67 →  59
+13:48:58  INFO    leverage_soft           59 →  56
+13:48:58  INFO  track2 apply_filters end: 56 companies pass all filters
+13:48:58  INFO  track2 scored 16 companies; top=0.865  bottom=0.385
+13:48:58  INFO  track2 apply_filters start: 903 total, 831 with sufficient data
+13:48:58  INFO    rev_growth_10pct       831 → 174
+13:48:58  INFO    rev_acceleration       174 → 121
+13:48:58  INFO    gross_margin           121 →  68
+13:48:58  INFO    fcf_last2yr             68 →  60
+13:48:58  INFO    leverage_soft           60 →  57
+13:48:58  INFO  track2 apply_filters end: 57 companies pass all filters
+13:48:58  INFO  track2 scored 13 companies; top=0.710  bottom=0.335
+13:48:58  INFO  track2 apply_filters start: 903 total, 831 with sufficient data
+13:48:58  INFO    rev_growth_10pct       831 → 175
+13:48:58  INFO    rev_acceleration       175 → 122
+13:48:58  INFO    gross_margin           122 →  69
+13:48:58  INFO    fcf_last2yr             69 →  61
+13:48:58  INFO    leverage_soft           61 →  58
+13:48:58  INFO  track2 apply_filters end: 58 companies pass all filters
+13:48:58  INFO  track2 scored 8 companies; top=0.771  bottom=0.356
+13:48:58  INFO  track2 apply_filters start: 903 total, 831 with sufficient data
+13:48:58  INFO    rev_growth_10pct       831 → 186
+13:48:58  INFO    rev_acceleration       186 → 132
+13:48:58  INFO    gross_margin           132 →  70
+13:48:58  INFO    fcf_last2yr             70 →  63
+13:48:58  INFO    leverage_soft           63 →  60
+13:48:58  INFO  track2 apply_filters end: 60 companies pass all filters
+13:48:58  INFO  track2 scored 12 companies; top=0.660  bottom=0.406
+13:48:58  INFO  Progress: 96 / 120 test months
+13:48:58  INFO  track2 apply_filters start: 903 total, 831 with sufficient data
+13:48:58  INFO    rev_growth_10pct       831 → 188
+13:48:58  INFO    rev_acceleration       188 → 134
+13:48:58  INFO    gross_margin           134 →  70
+13:48:58  INFO    fcf_last2yr             70 →  63
+13:48:58  INFO    leverage_soft           63 →  60
+13:48:58  INFO  track2 apply_filters end: 60 companies pass all filters
+13:48:58  INFO  track2 scored 14 companies; top=0.729  bottom=0.383
+13:48:58  INFO  track2 apply_filters start: 903 total, 831 with sufficient data
+13:48:58  INFO    rev_growth_10pct       831 → 187
+13:48:58  INFO    rev_acceleration       187 → 134
+13:48:58  INFO    gross_margin           134 →  71
+13:48:58  INFO    fcf_last2yr             71 →  64
+13:48:58  INFO    leverage_soft           64 →  61
+13:48:58  INFO  track2 apply_filters end: 61 companies pass all filters
+13:48:58  INFO  track2 scored 17 companies; top=0.797  bottom=0.357
+13:48:58  INFO  track2 apply_filters start: 903 total, 835 with sufficient data
+13:48:58  INFO    rev_growth_10pct       835 → 292
+13:48:58  INFO    rev_acceleration       292 → 236
+13:48:58  INFO    gross_margin           236 →  91
+13:48:58  INFO    fcf_last2yr             91 →  77
+13:48:58  INFO    leverage_soft           77 →  74
+13:48:58  INFO  track2 apply_filters end: 74 companies pass all filters
+13:48:58  INFO  track2 scored 41 companies; top=0.818  bottom=0.257
+13:48:58  INFO  track2 apply_filters start: 903 total, 838 with sufficient data
+13:48:58  INFO    rev_growth_10pct       838 → 301
+13:48:58  INFO    rev_acceleration       301 → 238
+13:48:58  INFO    gross_margin           238 →  88
+13:48:58  INFO    fcf_last2yr             88 →  73
+13:48:58  INFO    leverage_soft           73 →  70
+13:48:58  INFO  track2 apply_filters end: 70 companies pass all filters
+13:48:58  INFO  track2 scored 35 companies; top=0.841  bottom=0.288
+13:48:58  INFO  track2 apply_filters start: 903 total, 838 with sufficient data
+13:48:58  INFO    rev_growth_10pct       838 → 301
+13:48:58  INFO    rev_acceleration       301 → 238
+13:48:58  INFO    gross_margin           238 →  88
+13:48:58  INFO    fcf_last2yr             88 →  73
+13:48:58  INFO    leverage_soft           73 →  70
+13:48:58  INFO  track2 apply_filters end: 70 companies pass all filters
+13:48:58  INFO  track2 scored 50 companies; top=0.836  bottom=0.248
+13:48:58  INFO  track2 apply_filters start: 903 total, 838 with sufficient data
+13:48:58  INFO    rev_growth_10pct       838 → 303
+13:48:58  INFO    rev_acceleration       303 → 237
+13:48:58  INFO    gross_margin           237 →  88
+13:48:58  INFO    fcf_last2yr             88 →  73
+13:48:58  INFO    leverage_soft           73 →  70
+13:48:58  INFO  track2 apply_filters end: 70 companies pass all filters
+13:48:58  INFO  track2 scored 44 companies; top=0.856  bottom=0.289
+13:48:58  INFO  track2 apply_filters start: 903 total, 840 with sufficient data
+13:48:58  INFO    rev_growth_10pct       840 → 306
+13:48:58  INFO    rev_acceleration       306 → 238
+13:48:58  INFO    gross_margin           238 →  88
+13:48:58  INFO    fcf_last2yr             88 →  73
+13:48:58  INFO    leverage_soft           73 →  70
+13:48:58  INFO  track2 apply_filters end: 70 companies pass all filters
+13:48:58  INFO  track2 scored 48 companies; top=0.831  bottom=0.263
+13:48:58  INFO  track2 apply_filters start: 903 total, 840 with sufficient data
+13:48:58  INFO    rev_growth_10pct       840 → 308
+13:48:58  INFO    rev_acceleration       308 → 240
+13:48:58  INFO    gross_margin           240 →  88
+13:48:58  INFO    fcf_last2yr             88 →  73
+13:48:58  INFO    leverage_soft           73 →  70
+13:48:58  INFO  track2 apply_filters end: 70 companies pass all filters
+13:48:58  INFO  track2 scored 47 companies; top=0.763  bottom=0.242
+13:48:58  INFO  track2 apply_filters start: 903 total, 840 with sufficient data
+13:48:58  INFO    rev_growth_10pct       840 → 308
+13:48:58  INFO    rev_acceleration       308 → 237
+13:48:58  INFO    gross_margin           237 →  85
+13:48:58  INFO    fcf_last2yr             85 →  71
+13:48:58  INFO    leverage_soft           71 →  68
+13:48:58  INFO  track2 apply_filters end: 68 companies pass all filters
+13:48:58  INFO  track2 scored 52 companies; top=0.801  bottom=0.198
+13:48:58  INFO  track2 apply_filters start: 903 total, 840 with sufficient data
+13:48:58  INFO    rev_growth_10pct       840 → 309
+13:48:58  INFO    rev_acceleration       309 → 237
+13:48:58  INFO    gross_margin           237 →  85
+13:48:58  INFO    fcf_last2yr             85 →  71
+13:48:58  INFO    leverage_soft           71 →  68
+13:48:58  INFO  track2 apply_filters end: 68 companies pass all filters
+13:48:58  INFO  track2 scored 55 companies; top=0.835  bottom=0.231
+13:48:58  INFO  track2 apply_filters start: 903 total, 840 with sufficient data
+13:48:58  INFO    rev_growth_10pct       840 → 307
+13:48:58  INFO    rev_acceleration       307 → 235
+13:48:58  INFO    gross_margin           235 →  84
+13:48:58  INFO    fcf_last2yr             84 →  70
+13:48:58  INFO    leverage_soft           70 →  67
+13:48:58  INFO  track2 apply_filters end: 67 companies pass all filters
+13:48:58  INFO  track2 scored 46 companies; top=0.829  bottom=0.227
+13:48:58  INFO  track2 apply_filters start: 903 total, 840 with sufficient data
+13:48:58  INFO    rev_growth_10pct       840 → 299
+13:48:58  INFO    rev_acceleration       299 → 224
+13:48:58  INFO    gross_margin           224 →  83
+13:48:58  INFO    fcf_last2yr             83 →  68
+13:48:58  INFO    leverage_soft           68 →  65
+13:48:58  INFO  track2 apply_filters end: 65 companies pass all filters
+13:48:58  INFO  track2 scored 34 companies; top=0.860  bottom=0.325
+13:48:58  INFO  Progress: 108 / 120 test months
+13:48:58  INFO  track2 apply_filters start: 903 total, 840 with sufficient data
+13:48:58  INFO    rev_growth_10pct       840 → 298
+13:48:58  INFO    rev_acceleration       298 → 222
+13:48:58  INFO    gross_margin           222 →  83
+13:48:58  INFO    fcf_last2yr             83 →  68
+13:48:58  INFO    leverage_soft           68 →  65
+13:48:58  INFO  track2 apply_filters end: 65 companies pass all filters
+13:48:58  INFO  track2 scored 38 companies; top=0.826  bottom=0.235
+13:48:58  INFO  track2 apply_filters start: 903 total, 840 with sufficient data
+13:48:58  INFO    rev_growth_10pct       840 → 298
+13:48:58  INFO    rev_acceleration       298 → 220
+13:48:58  INFO    gross_margin           220 →  80
+13:48:58  INFO    fcf_last2yr             80 →  66
+13:48:58  INFO    leverage_soft           66 →  63
+13:48:58  INFO  track2 apply_filters end: 63 companies pass all filters
+13:48:58  INFO  track2 scored 39 companies; top=0.822  bottom=0.224
+13:48:58  INFO  track2 apply_filters start: 903 total, 852 with sufficient data
+13:48:58  INFO    rev_growth_10pct       852 → 212
+13:48:58  INFO    rev_acceleration       212 →  99
+13:48:58  INFO    gross_margin            99 →  47
+13:48:58  INFO    fcf_last2yr             47 →  38
+13:48:58  INFO    leverage_soft           38 →  35
+13:48:58  INFO  track2 apply_filters end: 35 companies pass all filters
+13:48:58  INFO  track2 scored 25 companies; top=0.773  bottom=0.281
+13:48:58  INFO  track2 apply_filters start: 903 total, 853 with sufficient data
+13:48:58  INFO    rev_growth_10pct       853 → 210
+13:48:58  INFO    rev_acceleration       210 →  92
+13:48:58  INFO    gross_margin            92 →  41
+13:48:58  INFO    fcf_last2yr             41 →  33
+13:48:58  INFO    leverage_soft           33 →  32
+13:48:58  INFO  track2 apply_filters end: 32 companies pass all filters
+13:48:58  INFO  track2 scored 23 companies; top=0.801  bottom=0.353
+13:48:58  INFO  track2 apply_filters start: 903 total, 853 with sufficient data
+13:48:58  INFO    rev_growth_10pct       853 → 210
+13:48:58  INFO    rev_acceleration       210 →  92
+13:48:58  INFO    gross_margin            92 →  41
+13:48:58  INFO    fcf_last2yr             41 →  33
+13:48:58  INFO    leverage_soft           33 →  32
+13:48:58  INFO  track2 apply_filters end: 32 companies pass all filters
+13:48:58  INFO  track2 scored 22 companies; top=0.799  bottom=0.307
+13:48:58  INFO  track2 apply_filters start: 903 total, 853 with sufficient data
+13:48:58  INFO    rev_growth_10pct       853 → 207
+13:48:58  INFO    rev_acceleration       207 →  91
+13:48:58  INFO    gross_margin            91 →  39
+13:48:58  INFO    fcf_last2yr             39 →  31
+13:48:58  INFO    leverage_soft           31 →  30
+13:48:58  INFO  track2 apply_filters end: 30 companies pass all filters
+13:48:58  INFO  track2 scored 22 companies; top=0.791  bottom=0.292
+13:48:58  INFO  track2 apply_filters start: 903 total, 853 with sufficient data
+13:48:58  INFO    rev_growth_10pct       853 → 206
+13:48:58  INFO    rev_acceleration       206 →  90
+13:48:58  INFO    gross_margin            90 →  39
+13:48:58  INFO    fcf_last2yr             39 →  31
+13:48:58  INFO    leverage_soft           31 →  30
+13:48:58  INFO  track2 apply_filters end: 30 companies pass all filters
+13:48:58  INFO  track2 scored 18 companies; top=0.758  bottom=0.244
+13:48:58  INFO  track2 apply_filters start: 903 total, 853 with sufficient data
+13:48:58  INFO    rev_growth_10pct       853 → 205
+13:48:58  INFO    rev_acceleration       205 →  88
+13:48:58  INFO    gross_margin            88 →  39
+13:48:58  INFO    fcf_last2yr             39 →  31
+13:48:58  INFO    leverage_soft           31 →  30
+13:48:58  INFO  track2 apply_filters end: 30 companies pass all filters
+13:48:58  INFO  track2 scored 20 companies; top=0.762  bottom=0.282
+13:48:58  INFO  track2 apply_filters start: 903 total, 853 with sufficient data
+13:48:58  INFO    rev_growth_10pct       853 → 200
+13:48:58  INFO    rev_acceleration       200 →  83
+13:48:59  INFO    gross_margin            83 →  36
+13:48:59  INFO    fcf_last2yr             36 →  28
+13:48:59  INFO    leverage_soft           28 →  27
+13:48:59  INFO  track2 apply_filters end: 27 companies pass all filters
+13:48:59  INFO  track2 scored 19 companies; top=0.770  bottom=0.270
+13:48:59  INFO  track2 apply_filters start: 903 total, 853 with sufficient data
+13:48:59  INFO    rev_growth_10pct       853 → 199
+13:48:59  INFO    rev_acceleration       199 →  82
+13:48:59  INFO    gross_margin            82 →  36
+13:48:59  INFO    fcf_last2yr             36 →  28
+13:48:59  INFO    leverage_soft           28 →  27
+13:48:59  INFO  track2 apply_filters end: 27 companies pass all filters
+13:48:59  INFO  track2 scored 23 companies; top=0.739  bottom=0.305
+13:48:59  INFO  track2 apply_filters start: 903 total, 853 with sufficient data
+13:48:59  INFO    rev_growth_10pct       853 → 199
+13:48:59  INFO    rev_acceleration       199 →  82
+13:48:59  INFO    gross_margin            82 →  36
+13:48:59  INFO    fcf_last2yr             36 →  28
+13:48:59  INFO    leverage_soft           28 →  27
+13:48:59  INFO  track2 apply_filters end: 27 companies pass all filters
+13:48:59  INFO  track2 scored 25 companies; top=0.754  bottom=0.239
+13:48:59  INFO  track2 apply_filters start: 903 total, 853 with sufficient data
+13:48:59  INFO    rev_growth_10pct       853 → 202
+13:48:59  INFO    rev_acceleration       202 →  88
+13:48:59  INFO    gross_margin            88 →  39
+13:48:59  INFO    fcf_last2yr             39 →  31
+13:48:59  INFO    leverage_soft           31 →  30
+13:48:59  INFO  track2 apply_filters end: 30 companies pass all filters
+13:48:59  INFO  track2 scored 22 companies; top=0.734  bottom=0.148
+13:48:59  INFO  Progress: 120 / 120 test months
+13:48:59  INFO  track2 apply_filters start: 903 total, 853 with sufficient data
+13:48:59  INFO    rev_growth_10pct       853 → 201
+13:48:59  INFO    rev_acceleration       201 →  88
+13:48:59  INFO    gross_margin            88 →  39
+13:48:59  INFO    fcf_last2yr             39 →  31
+13:48:59  INFO    leverage_soft           31 →  30
+13:48:59  INFO  track2 apply_filters end: 30 companies pass all filters
+13:48:59  INFO  track2 scored 23 companies; top=0.758  bottom=0.246
+13:48:59  INFO  Backtest complete: 120 test months with picks, 1656 hit-rate observations
+13:48:59  INFO  Momentum impact CSV → /home/gabriel/Crucible/data/diagnostics/track2_momentum_impact.csv
+13:48:59  INFO  Report saved: /home/gabriel/Crucible/data/results/track2_SP500_1m_report.md
+13:48:59  INFO  Ticker contribution report saved: /home/gabriel/Crucible/data/results/track2_SP500_1m_contributions.md
+13:48:59  INFO  Picks CSV saved: /home/gabriel/Crucible/data/results/track2_SP500_1m_picks.csv (1656 rows)
+
+═════════════════════════════════════════════════════════════════
+  Track 2 Backtest — RUSSELL1000 — 1-month holding
+═════════════════════════════════════════════════════════════════
+  Total return:      342.84%
+  Benchmark (SP500): 259.15%
+  Excess return:     +83.70%
+  Sharpe (ann.):     0.64
+  Max drawdown:      -29.23%
+  Hit rate (12m):    64.67%
+  Avg picks/month:   13.8
+  Unique tickers:    115
+  Test months:       120
+
+  Momentum filter:   26.8 → 16.8 avg candidates (37% cut, 0 months with 0 left)
+═════════════════════════════════════════════════════════════════
+
+  Report:        /home/gabriel/Crucible/data/results/track2_SP500_1m_report.md
+  Contributions: /home/gabriel/Crucible/data/results/track2_SP500_1m_contributions.md
+  Picks CSV:     /home/gabriel/Crucible/data/results/track2_SP500_1m_picks.csv
+  Momentum CSV:  /home/gabriel/Crucible/data/diagnostics/track2_momentum_impact.csv
+

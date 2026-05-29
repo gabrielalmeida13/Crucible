@@ -67,13 +67,14 @@ def filter_fcf_positive_last2yr(
     return df[mask]
 
 
-def filter_leverage(
+def filter_leverage_soft(
     df: pd.DataFrame,
-    max_ratio: float = 5.0,
+    soft_max: float = 8.0,
 ) -> pd.DataFrame:
-    """Keep tickers where Net Debt / EBITDA < max_ratio (relaxed vs Track 1's 3.0)."""
-    mask = df["net_debt_ebitda"].notna() & (df["net_debt_ebitda"] < max_ratio)
-    return df[mask]
+    """Pass if net_debt_ebitda < soft_max OR fcf_trajectory > 0 (debt-reducing via FCF growth)."""
+    low_debt  = df["net_debt_ebitda"].notna() & (df["net_debt_ebitda"] < soft_max)
+    deleveraging = df["fcf_trajectory"].notna() & (df["fcf_trajectory"] > 0)
+    return df[low_debt | deleveraging]
 
 
 def apply_filters(
@@ -96,7 +97,7 @@ def apply_filters(
         ("rev_acceleration",  lambda d: filter_revenue_acceleration(d)),
         ("gross_margin",      lambda d: filter_gross_margin_growth(d, thresholds.gross_margin_min)),
         ("fcf_last2yr",       lambda d: filter_fcf_positive_last2yr(d, thresholds.fcf_positive_last2yr_min)),
-        ("leverage",          lambda d: filter_leverage(d, thresholds.net_debt_ebitda_max)),
+        ("leverage_soft",     lambda d: filter_leverage_soft(d, thresholds.net_debt_ebitda_soft_max)),
     ]
 
     result = usable
@@ -121,8 +122,13 @@ def score(
 ) -> pd.DataFrame:
     """Compute growth_quality, momentum, valuation, and composite scores.
 
-    growth_quality (50%): equal-weight rank of revenue_acceleration,
-        operating_margin_trend, fcf_trajectory.
+    growth_quality (50% of composite):
+        revenue_acceleration    10%  — accelerating top-line growth
+        operating_margin_trend  15%  — expanding margins
+        fcf_trajectory          15%  — improving free cash flow
+        deferred_revenue_growth 10%  — rising order backlog (book-to-bill proxy)
+        eps_surprise_last_q     10%  — earnings beat strength (Phase 4.7)
+        asset_growth_penalty   -10%  — penalises over-investment (Fama-French CMA)
     momentum (30%): average rank of momentum_raw (12-1m) and momentum_3m.
     valuation (20%): p_s rank vs sector median; falls back to p_fcf per-ticker.
     """
@@ -130,11 +136,30 @@ def score(
     accounting_region = _derive_accounting_region(df)
     peer_group = df["sector"].fillna("Unknown") + "|" + accounting_region
 
-    # --- growth quality (3 sub-components, equal weight 1/3 each) ---
-    gq_rev  = _peer_rank(df, "revenue_acceleration",   peer_group, ascending=True,  fill_nan=0.0)
-    gq_om   = _peer_rank(df, "operating_margin_trend", peer_group, ascending=True,  fill_nan=0.0)
-    gq_fcf  = _peer_rank(df, "fcf_trajectory",         peer_group, ascending=True,  fill_nan=0.0)
-    df["growth_quality_score"] = (gq_rev + gq_om + gq_fcf) / 3.0
+    # --- growth quality (6 sub-components, weighted) ---
+    gq_rev = _peer_rank(df, "revenue_acceleration",    peer_group, ascending=True, fill_nan=0.0)
+    gq_om  = _peer_rank(df, "operating_margin_trend",  peer_group, ascending=True, fill_nan=0.0)
+    gq_fcf = _peer_rank(df, "fcf_trajectory",          peer_group, ascending=True, fill_nan=0.0)
+    gq_def = _peer_rank(df, "deferred_revenue_growth", peer_group, ascending=True, fill_nan=0.0)
+    gq_eps = _peer_rank(df, "eps_surprise_last_q",     peer_group, ascending=True, fill_nan=0.5)
+
+    # Asset growth penalty: ascending=False → lower growth = higher quality rank (0→1).
+    # Companies with >30% asset growth are hard-capped at the worst quality rank (0.0),
+    # making their penalty term = 1 − 0.0 = 1.0 (maximum deduction from score).
+    gq_asset_rank = _peer_rank(df, "asset_growth_yoy", peer_group, ascending=False, fill_nan=0.5)
+    if "asset_growth_yoy" in df.columns:
+        overinvest = df["asset_growth_yoy"].notna() & (df["asset_growth_yoy"] > 0.30)
+        gq_asset_rank = gq_asset_rank.where(~overinvest, 0.0)
+    gq_asset_penalty = 1.0 - gq_asset_rank  # rank 0.0 → max penalty 1.0; rank 1.0 → no penalty
+
+    df["growth_quality_score"] = (
+        0.10 * gq_rev
+        + 0.15 * gq_om
+        + 0.15 * gq_fcf
+        + 0.10 * gq_def
+        + 0.10 * gq_eps
+        - 0.10 * gq_asset_penalty
+    )
 
     # --- momentum (average of 12-1m and 3m ranks) ---
     mom_raw = _peer_rank(df, "momentum_raw", peer_group, ascending=True, fill_nan=0.5)

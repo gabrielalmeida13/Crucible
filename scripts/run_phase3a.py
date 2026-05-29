@@ -18,13 +18,17 @@ import logging
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from sklearn.feature_selection import mutual_info_classif
+
 from crucible.ml.features import FEATURE_COLS, build_feature_matrix
 from crucible.ml.model import (
+    _impute,
     evaluate,
     feature_importances,
     save_model,
@@ -131,15 +135,30 @@ def main() -> None:
         logger.error("No validation data — check price history for 2022–2023.")
         sys.exit(1)
 
-    logger.info("Training model (LR → RF → XGBoost escalation)...")
+    # Inject a pure-noise column as an objective importance floor.
+    # Train and val use independent seeds so neither leaks signal.
+    rng_tr = np.random.default_rng(0)
+    rng_vl = np.random.default_rng(1)
+    X_train = X_train.copy()
+    X_val   = X_val.copy()
+    X_train["random_baseline"] = rng_tr.standard_normal(len(X_train))
+    X_val["random_baseline"]   = rng_vl.standard_normal(len(X_val))
+    logger.info("random_baseline column added to train and val sets")
+
+    logger.info("Training all models (LR, RF, XGBoost)...")
     artifact = train_phase3a(X_train, y_train, X_val, y_val, train_end_date=TRAIN_END)
-    logger.info("Selected: %s  val_accuracy=%.3f", artifact.model_type, artifact.val_accuracy)
+    logger.info("Best model: %s  val_accuracy=%.3f", artifact.model_type, artifact.val_accuracy)
 
     val_metrics = evaluate(artifact, X_val, y_val)
-    imp = feature_importances(artifact).head(10)
+    imp = feature_importances(artifact)  # all features, sorted descending
+
+    X_tr_imp = _impute(X_train, artifact.imputation_values)
+    mi_scores = mutual_info_classif(X_tr_imp, y_train, random_state=42)
+    mi_series = pd.Series(mi_scores, index=X_train.columns).sort_values(ascending=False)
+    logger.info("MI computed for %d features (including random_baseline)", len(mi_series))
 
     save_model(artifact, MODEL_PATH)
-    _write_report(artifact, val_metrics, imp, X_train, y_train, X_val, y_val)
+    _write_report(artifact, val_metrics, imp, mi_series, X_train, y_train, X_val, y_val)
     logger.info("Report saved: %s", REPORT_PATH)
 
 
@@ -147,6 +166,7 @@ def _write_report(
     artifact,
     val_metrics: dict,
     imp: pd.Series,
+    mi_series: pd.Series,
     X_train: pd.DataFrame,
     y_train: pd.Series,
     X_val: pd.DataFrame,
@@ -163,9 +183,38 @@ def _write_report(
         f"| **Actual 1** | {fn} | {tp} |"
     )
 
+    rand_imp = imp.get("random_baseline", 0.0)
+    rand_mi  = mi_series.get("random_baseline", 0.0)
+
+    def _imp_row(rank: int, name: str, val: float) -> str:
+        if name == "random_baseline":
+            return f"| {rank} | **random_baseline** | **{val:.4f}** | ← threshold |"
+        note = "candidate for removal" if val < rand_imp else ""
+        return f"| {rank} | {name} | {val:.4f} | {note} |"
+
+    def _mi_row(rank: int, name: str, val: float) -> str:
+        if name == "random_baseline":
+            return f"| {rank} | **random_baseline** | **{val:.4f}** | ← threshold |"
+        note = "candidate for removal" if val < rand_mi else ""
+        return f"| {rank} | {name} | {val:.4f} | {note} |"
+
     imp_rows = "\n".join(
-        f"| {i + 1} | {name} | {val:.4f} |"
-        for i, (name, val) in enumerate(imp.items())
+        _imp_row(i + 1, name, val) for i, (name, val) in enumerate(imp.items())
+    )
+    mi_rows = "\n".join(
+        _mi_row(i + 1, name, val) for i, (name, val) in enumerate(mi_series.items())
+    )
+
+    all_accs = artifact.all_val_accuracies
+    model_rows = "\n".join(
+        "| {} | {:.3f} ({:.1%}) | {} | {} |".format(
+            name,
+            a,
+            a,
+            "ABOVE" if a >= 0.55 else "below",
+            "**selected**" if name == artifact.model_type else "",
+        )
+        for name, a in all_accs.items()
     )
 
     lines = [
@@ -182,7 +231,7 @@ def _write_report(
         f"| Train window | {TRAIN_START.date()} – {TRAIN_END.date()} |",
         f"| Validation window | {VAL_START.date()} – {VAL_END.date()} |",
         "| Held-out | 2024-01-01 – present (not evaluated) |",
-        f"| Features | {len(FEATURE_COLS)} |",
+        f"| Features | {len(FEATURE_COLS)} real + 1 random_baseline |",
         f"| Model selected | {artifact.model_type} |",
         f"| Train rows | {len(X_train)} |",
         f"| Train label balance | {y_train.mean():.1%} outperform |",
@@ -191,12 +240,23 @@ def _write_report(
         "",
         "---",
         "",
-        "## Validation accuracy",
+        "## Model comparison (2022–2023 validation)",
+        "",
+        "All three models are always trained. The highest validation accuracy wins.",
+        "Threshold (55.0%) is informational only.",
+        "",
+        "| Model | Accuracy | vs threshold | |",
+        "|-------|----------|--------------|---|",
+        model_rows,
+        "",
+        "---",
+        "",
+        "## Validation accuracy (selected model)",
         "",
         f"**Accuracy on 2022–2023 validation set: {acc:.3f} ({acc:.1%})**",
         "",
-        "Threshold for acceptability: 55.0%",
-        f"Result: {'PASS' if acc >= 0.55 else 'BELOW THRESHOLD'}",
+        f"Selected model: `{artifact.model_type}`",
+        f"Threshold (informational): 55.0% — Result: {'ABOVE' if acc >= 0.55 else 'BELOW'}",
         "",
         "---",
         "",
@@ -206,11 +266,26 @@ def _write_report(
         "",
         "---",
         "",
-        "## Top 10 feature importances",
+        "## Feature importances (model-derived)",
         "",
-        "| Rank | Feature | Importance |",
-        "|------|---------|------------|",
+        f"Model type: `{artifact.model_type}` — importances are absolute coefficients for LR, "
+        "mean decrease in impurity for RF/XGBoost. "
+        "`random_baseline` is pure N(0,1) noise; real features below its importance are flagged.",
+        "",
+        "| Rank | Feature | Importance | Notes |",
+        "|------|---------|------------|-------|",
         imp_rows,
+        "",
+        "---",
+        "",
+        "## Feature ranking by Mutual Information (model-independent)",
+        "",
+        "MI is computed on the imputed training set (2010–2021) against the binary outperform label. "
+        "`random_baseline` is pure N(0,1) noise; real features below its MI score are flagged.",
+        "",
+        "| Rank | Feature | MI Score | Notes |",
+        "|------|---------|----------|-------|",
+        mi_rows,
         "",
         "---",
         "",

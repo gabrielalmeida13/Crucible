@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / ".env")
 
-from crucible.config import CrucibleConfig, FilterThresholds, Track2FilterThresholds
+from crucible.config import CrucibleConfig, FilterThresholds, Track2FilterThresholds, Track3FilterThresholds
 from crucible.fetcher import (
     _load_cik_mapping,
     fetch_russell1000_tickers,
@@ -46,9 +46,14 @@ from crucible.snapshot import build_snapshots_parallel
 from crucible.tracks.track2_growth import (
     filter_fcf_positive_last2yr,
     filter_gross_margin_growth,
-    filter_leverage as filter_leverage_t2,
+    filter_leverage_soft as filter_leverage_t2,
     filter_revenue_acceleration,
     filter_revenue_growth_10pct,
+)
+from crucible.tracks.track3_value import (
+    filter_fcf_positive_last5,
+    filter_recovery_signal,
+    filter_roic_proxy as filter_roic_proxy_t3,
 )
 
 # ---------------------------------------------------------------------------
@@ -129,7 +134,7 @@ def _compute_funnel_track2(
         after_accel   = filter_revenue_acceleration(after_growth)
         after_margin  = filter_gross_margin_growth(after_accel, thresholds.gross_margin_min)
         after_fcf     = filter_fcf_positive_last2yr(after_margin, thresholds.fcf_positive_last2yr_min)
-        after_debt    = filter_leverage_t2(after_fcf, thresholds.net_debt_ebitda_max)
+        after_debt    = filter_leverage_t2(after_fcf, thresholds.net_debt_ebitda_soft_max)
 
         rows.append({
             "date":              date.date(),
@@ -141,6 +146,56 @@ def _compute_funnel_track2(
             "passed_fcf":        len(after_fcf),
             "passed_leverage":   len(after_debt),
             "passed_all":        len(after_debt),
+        })
+    return rows
+
+
+def _compute_funnel_track3(
+    fund_by_date: dict[pd.Timestamp, pd.DataFrame],
+    thresholds: Track3FilterThresholds,
+) -> list[dict]:
+    rows: list[dict] = []
+    for date in sorted(fund_by_date):
+        df = fund_by_date[date]
+        total    = len(df)
+        n_insuff = int(df["insufficient_data"].astype(bool).sum())
+        usable   = df[~df["insufficient_data"].astype(bool)]
+
+        after_roic     = filter_roic_proxy_t3(usable, thresholds.roic_proxy_min)
+        # p_fcf_vs_history filter is SKIPPED — no prices in the diagnostic
+        after_fcf      = filter_fcf_positive_last5(after_roic, thresholds.fcf_positive_min_years)
+        after_recovery = filter_recovery_signal(
+            after_fcf,
+            buyback_min=thresholds.buyback_signal_min,
+            gm_recovery_change_min=thresholds.gm_recovery_change_min,
+        )
+
+        # Split recovery signal counts for diagnostics
+        signal_a = after_roic["share_buyback_signal"].notna() & (after_roic["share_buyback_signal"] > thresholds.buyback_signal_min)
+        signal_b = (
+            after_roic["revenue_growth_yr1"].notna()
+            & (after_roic["revenue_growth_yr1"] > 0)
+            & after_roic["revenue_growth_yr2"].notna()
+            & (after_roic["revenue_growth_yr2"] < 0)
+        )
+        signal_c = (
+            after_roic["gross_margin_yr1_change"].notna()
+            & (after_roic["gross_margin_yr1_change"] > thresholds.gm_recovery_change_min)
+            & after_roic["gross_margin_trend_slope"].notna()
+            & (after_roic["gross_margin_trend_slope"] < 0)
+        )
+
+        rows.append({
+            "date":               date.date(),
+            "total_tickers":      total,
+            "insufficient_data":  n_insuff,
+            "passed_roic":        len(after_roic),
+            "passed_fcf":         len(after_fcf),
+            "passed_recovery":    len(after_recovery),
+            "passed_all":         len(after_recovery),
+            "with_signal_a":      int(signal_a.sum()),
+            "with_signal_b":      int(signal_b.sum()),
+            "with_signal_c":      int(signal_c.sum()),
         })
     return rows
 
@@ -247,7 +302,7 @@ def _print_table_track2(
         f"Rev acceleration > 0  |  "
         f"Gross margin ≥ {thresholds.gross_margin_min:.0%} OR expanding  |  "
         f"FCF positive ≥ {thresholds.fcf_positive_last2yr_min} of 2 yrs  |  "
-        f"Net Debt/EBITDA < {thresholds.net_debt_ebitda_max:.1f}"
+        f"Net Debt/EBITDA < {thresholds.net_debt_ebitda_soft_max:.1f} OR fcf_trajectory > 0"
     )
     print("NOTE: Momentum filter (price momentum > 0) excluded — no prices in diagnostic.")
     print()
@@ -307,9 +362,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--track",
-        choices=["1", "2"],
+        choices=["1", "2", "3"],
         default="1",
-        help="Filter stack to use: 1=Quality (default), 2=Growth Inflection",
+        help="Filter stack to use: 1=Quality (default), 2=Growth Inflection, 3=Value Recovery",
     )
     args = parser.parse_args()
     universe: str = args.universe
@@ -361,6 +416,15 @@ def main() -> None:
         pd.DataFrame(rows).to_csv(output_path, index=False)
         log.info("CSV written → %s", output_path)
         _print_table_track2(rows, t2_thresholds, universe)
+        _print_column_coverage(fund_by_date)
+    elif track == "3":
+        t3_thresholds = Track3FilterThresholds()
+        rows = _compute_funnel_track3(fund_by_date, t3_thresholds)
+        output_path = ROOT / "data" / "diagnostics" / f"filter_funnel_track3_{universe.lower()}.csv"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(rows).to_csv(output_path, index=False)
+        log.info("CSV written → %s", output_path)
+        _print_table_track3(rows, t3_thresholds, universe)
     else:
         rows = _compute_funnel(fund_by_date, config.filters)
         output_path = ROOT / "data" / "diagnostics" / f"filter_funnel_{universe.lower()}.csv"
@@ -369,6 +433,78 @@ def main() -> None:
         log.info("CSV written → %s", output_path)
         _print_table(rows, config.filters, universe)
         _print_column_coverage(fund_by_date)
+
+
+def _print_table_track3(
+    rows: list[dict],
+    thresholds: Track3FilterThresholds,
+    universe: str,
+) -> None:
+    cols = [
+        ("date",       "date",              10),
+        ("total",      "total_tickers",      6),
+        ("insuff",     "insufficient_data",  6),
+        ("→roic>8%",   "passed_roic",        8),
+        ("→fcf≥2/5",   "passed_fcf",         7),
+        ("→recovery",  "passed_recovery",    9),
+        ("passed",     "passed_all",         6),
+    ]
+
+    print()
+    print(f"Track 3 Filter Funnel — {universe}, annual snapshots Jan 2010–2021")
+    print(
+        f"Thresholds: ROIC > {thresholds.roic_proxy_min:.0%}  |  "
+        f"FCF positive ≥ {thresholds.fcf_positive_min_years} of 5 yrs  |  "
+        "Recovery signal (buyback > 3% OR rev inflection OR margin recovery)"
+    )
+    print("NOTE: p_fcf_vs_history filter EXCLUDED — requires prices not available in diagnostic.")
+    print()
+
+    header = "  ".join(f"{label:>{width}}" for label, _, width in cols)
+    sep    = "  ".join("-" * width for _, _, width in cols)
+    print(header)
+    print(sep)
+
+    for row in rows:
+        line = "  ".join(f"{str(row[key]):>{width}}" for _, key, width in cols)
+        print(line)
+
+    print(sep)
+    avg_row = {
+        "date": "AVG",
+        **{key: round(sum(r[key] for r in rows) / len(rows)) for _, key, _ in cols[1:]},
+    }
+    print("  ".join(f"{str(avg_row[key]):>{width}}" for _, key, width in cols))
+    print()
+
+    avg_total  = avg_row["total_tickers"]
+    avg_insuff = avg_row["insufficient_data"]
+    avg_usable = avg_total - avg_insuff
+    avg_passed = avg_row["passed_all"]
+    pct = lambda n, d: f"{n/d:.0%}" if d else "n/a"
+
+    # Recovery signal breakdown (at post-ROIC stage)
+    avg_sig_a = round(sum(r["with_signal_a"] for r in rows) / len(rows))
+    avg_sig_b = round(sum(r["with_signal_b"] for r in rows) / len(rows))
+    avg_sig_c = round(sum(r["with_signal_c"] for r in rows) / len(rows))
+
+    print("Diagnosis (Track 3 — Value Recovery)")
+    print(f"  Average universe size:                 {avg_total}")
+    print(f"  Insufficient data (< 3 yrs):           {avg_insuff}  ({pct(avg_insuff, avg_total)} of total)")
+    print(f"  Pass ROIC > 8%:                        {avg_row['passed_roic']}  ({pct(avg_row['passed_roic'], avg_usable)} of usable)")
+    print(f"  Pass FCF positive ≥ 2 of 5 yrs:       {avg_row['passed_fcf']}  ({pct(avg_row['passed_fcf'], avg_usable)} of usable)")
+    print(f"  Pass recovery signal (any one):        {avg_passed}  ({pct(avg_passed, avg_usable)} of usable)")
+    print()
+    print("  Recovery signal breakdown (at post-ROIC stage, avg across dates):")
+    print(f"    Signal A — buyback > 3%:             {avg_sig_a}  ({pct(avg_sig_a, avg_row['passed_roic'])} of ROIC-pass pool)")
+    print(f"    Signal B — revenue inflection:       {avg_sig_b}  ({pct(avg_sig_b, avg_row['passed_roic'])} of ROIC-pass pool)")
+    print(f"    Signal C — margin recovery:          {avg_sig_c}  ({pct(avg_sig_c, avg_row['passed_roic'])} of ROIC-pass pool)")
+    print()
+    print("  p_fcf_vs_history filter excluded — live backtest will cut further (requires prices).")
+    print()
+    output_path = ROOT / "data" / "diagnostics" / f"filter_funnel_track3_{universe.lower()}.csv"
+    print(f"  CSV written to: {output_path}")
+    print()
 
 
 def _print_column_coverage(fund_by_date: dict[pd.Timestamp, pd.DataFrame]) -> None:
@@ -381,6 +517,10 @@ def _print_column_coverage(fund_by_date: dict[pd.Timestamp, pd.DataFrame]) -> No
         "revenue_acceleration",
         "share_buyback_signal",
         "insider_buy_ratio",
+        # Phase 4.7
+        "asset_growth_yoy",
+        "deferred_revenue_growth",
+        "eps_surprise_last_q",
     ]
     # Use the latest snapshot for a single-date coverage summary
     latest_date = max(fund_by_date)

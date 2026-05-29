@@ -23,7 +23,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from pathlib import Path
 
+import joblib
 import pandas as pd
+
+_CACHE_DIR = Path(__file__).resolve().parent.parent / "data" / "cache"
 
 from crucible.fetcher import _load_dei_shares_cached, _to_float, get_shares_outstanding
 
@@ -65,6 +68,11 @@ _RAW_XBRL_TAGS: frozenset[str] = frozenset({
     # Interest expense (for interest coverage)
     "InterestExpense",
     "InterestAndDebtExpense",
+    # Total Assets (for asset_growth_yoy — Fama-French CMA proxy)
+    "Assets",
+    # Deferred Revenue (book-to-bill proxy for Track 2)
+    "DeferredRevenueCurrent",
+    "DeferredRevenue",
 })
 
 # ---------------------------------------------------------------------------
@@ -318,6 +326,7 @@ def compute_snapshot_row(
     _LOOKBACK = 5
     fcf_recent = list(fcf.tail(_LOOKBACK).dropna().values) if not fcf.empty else []
     fcf_5yr_avg: float | None = (sum(fcf_recent) / len(fcf_recent)) if fcf_recent else None
+    fcf_positive_years_last5: int = sum(1 for v in fcf_recent if v > 0)
 
     # 5-year average EBITDA
     ebitda_5yr_avg: float | None = None
@@ -411,9 +420,14 @@ def compute_snapshot_row(
         last2 = [_to_float(v) for v in fcf.tail(2).values]
         fcf_positive_last2yr = sum(1 for v in last2 if v is not None and v > 0)
 
-    # ── NEW Track 2: fcf_trajectory (OLS slope of FCF) ──
+    # ── NEW Track 2: fcf_trajectory (normalised OLS slope of FCF) ──
+    # Slope divided by mean(|FCF|) → dimensionless rate of change, comparable across sizes.
     fcf_nonnull = [v for v in fcf_vals if v is not None]
-    fcf_trajectory = linear_slope(fcf_nonnull) if len(fcf_nonnull) >= 2 else None
+    fcf_trajectory: float | None = None
+    if len(fcf_nonnull) >= 2:
+        slope = linear_slope(fcf_nonnull)
+        mean_abs = sum(abs(v) for v in fcf_nonnull) / len(fcf_nonnull)
+        fcf_trajectory = slope / mean_abs if mean_abs != 0.0 else None
 
     # ── NEW Track 2: gross_margin_yr1_change ──
     gross_margin_yr1_change: float | None = None
@@ -430,6 +444,40 @@ def compute_snapshot_row(
     # ── Feature 7: insider_buy_ratio ──
     # Disabled by default — Form 4 calls are too slow for bulk backtest work.
     insider_buy_ratio: float | None = None
+
+    # ── Phase 4.7 — Track 2 enrichment features ──
+
+    # Feature 8: asset_growth_yoy — Fama-French CMA proxy
+    # High asset growth predicts underperformance (over-investment signal).
+    assets = get_metric(pivoted, ["Assets"])
+    asset_growth_yoy: float | None = None
+    if len(assets) >= 2:
+        a_n  = _to_float(assets.iloc[-1])
+        a_n1 = _to_float(assets.iloc[-2])
+        if a_n is not None and a_n1 is not None and a_n1 != 0:
+            raw = (a_n - a_n1) / abs(a_n1)
+            asset_growth_yoy = max(-1.0, min(2.0, raw))
+
+    # Feature 9: deferred_revenue_growth — book-to-bill proxy (Track 2)
+    # Rising deferred revenue = collecting cash before delivering = order backlog signal.
+    deferred = get_metric(pivoted, ["DeferredRevenueCurrent", "DeferredRevenue"])
+    deferred_revenue_growth: float | None = None
+    if len(deferred) >= 2:
+        d_n  = _to_float(deferred.iloc[-1])
+        d_n1 = _to_float(deferred.iloc[-2])
+        if d_n is not None and d_n1 is not None and d_n1 != 0:
+            raw = (d_n - d_n1) / abs(d_n1)
+            deferred_revenue_growth = max(-1.0, min(3.0, raw))
+
+    # Feature 10: eps_surprise_last_q — annual Net Income as EPS proxy
+    # Positive YoY growth = company beating its own prior-year baseline.
+    eps_surprise_last_q: float | None = None
+    if len(ni) >= 2:
+        ni_n  = _to_float(ni.iloc[-1])
+        ni_n1 = _to_float(ni.iloc[-2])
+        if ni_n is not None and ni_n1 is not None and ni_n1 != 0:
+            raw = (ni_n - ni_n1) / abs(ni_n1)
+            eps_surprise_last_q = max(-2.0, min(5.0, raw))
 
     # Valuation multiples: price × EDGAR shares → market cap → multiples
     _MAX_MULTIPLE = 200.0
@@ -490,6 +538,12 @@ def compute_snapshot_row(
         "fcf_trajectory":                fcf_trajectory,
         "gross_margin_yr1_change":       gross_margin_yr1_change,
         "p_s":                           p_s_val,
+        # ── Track 3 new columns ──
+        "fcf_positive_years_last5":      fcf_positive_years_last5,
+        # ── Phase 4.7 new columns ──
+        "asset_growth_yoy":              asset_growth_yoy,
+        "deferred_revenue_growth":       deferred_revenue_growth,
+        "eps_surprise_last_q":           eps_surprise_last_q,
     }
 
 
@@ -537,12 +591,26 @@ def build_snapshots_parallel(
     edgar_dir: Path,
     prices: pd.DataFrame | None = None,
     workers: int = 4,
+    universe: str = "unknown",
+    use_cache: bool = True,
 ) -> dict[pd.Timestamp, pd.DataFrame]:
     """Build monthly fundamentals snapshots in parallel (memory-safe).
 
     prices, if provided, is used to populate valuation multiples at each snapshot
     date via EDGAR shares outstanding. workers=4 keeps peak concurrent memory safe.
+
+    Results are cached to data/cache/ by joblib. Pass use_cache=False to force rebuild.
     """
+    start_tag = dates[0].strftime("%Y%m")
+    end_tag   = dates[-1].strftime("%Y%m")
+    cache_path = _CACHE_DIR / f"snapshots_{universe}_{start_tag}_{end_tag}.pkl"
+
+    if use_cache and cache_path.exists():
+        log.info("Cache HIT — loading snapshots from %s", cache_path)
+        return joblib.load(cache_path)
+
+    log.info("Cache MISS — building %d snapshots from EDGAR (universe=%s)", len(dates), universe)
+
     result: dict[pd.Timestamp, pd.DataFrame] = {}
     total = len(dates)
     done = 0
@@ -565,6 +633,10 @@ def build_snapshots_parallel(
             done += 1
             if done % 12 == 0 or done == total:
                 log.info("Snapshots: %d / %d built", done, total)
+
+    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    joblib.dump(result, cache_path, compress=3)
+    log.info("Snapshots cached → %s", cache_path)
 
     return result
 
@@ -615,3 +687,65 @@ def attach_momentum(
 
         df["momentum_raw"] = pd.Series(mom_map,  dtype=float)
         df["momentum_3m"]  = pd.Series(mom3_map, dtype=float)
+
+
+# ---------------------------------------------------------------------------
+# Public: P/FCF history attachment (Track 3 price-attach layer)
+# ---------------------------------------------------------------------------
+
+
+def attach_p_fcf_history(
+    fund_by_date: dict[pd.Timestamp, pd.DataFrame],
+    lookback: int = 60,
+    min_history: int = 12,
+) -> None:
+    """Add p_fcf_5yr_avg, p_fcf_5yr_std, p_fcf_vs_history columns in-place.
+
+    For each snapshot date, looks back at up to `lookback` prior monthly snapshots
+    to compute rolling per-ticker P/FCF statistics. Requires prices to have been
+    attached (p_fcf column must be populated by build_snapshots_parallel).
+
+    p_fcf_vs_history = (p_fcf_5yr_avg - p_fcf_current) / p_fcf_5yr_std
+    Positive value means the current P/FCF is below the historical mean (statistically cheap).
+    A value > 1.0 means current P/FCF is more than one std below its own history.
+    """
+    dates = sorted(fund_by_date.keys())
+
+    # Build a p_fcf panel: each column is one snapshot date's p_fcf Series
+    pfcf_by_date = {
+        date: fund_by_date[date]["p_fcf"]
+        for date in dates
+        if "p_fcf" in fund_by_date[date].columns
+    }
+    if not pfcf_by_date:
+        log.warning("attach_p_fcf_history: no p_fcf column found — skipping")
+        return
+
+    # rows = dates, cols = tickers; NaN where ticker had no price/data that month
+    pfcf_panel: pd.DataFrame = pd.DataFrame(pfcf_by_date).T.reindex(dates)
+
+    for i, date in enumerate(dates):
+        df = fund_by_date[date]
+        hist = pfcf_panel.iloc[max(0, i - lookback): i]   # prior months, exclusive
+
+        if len(hist) < min_history:
+            df["p_fcf_5yr_avg"]    = float("nan")
+            df["p_fcf_5yr_std"]    = float("nan")
+            df["p_fcf_vs_history"] = float("nan")
+            continue
+
+        # Require each ticker to have at least min_history valid observations
+        valid_counts = hist.notna().sum(axis=0)
+        sufficient   = valid_counts >= min_history
+
+        avg = hist.mean(axis=0).where(sufficient)
+        std = hist.std(axis=0, ddof=1).where(sufficient)
+
+        current = df["p_fcf"] if "p_fcf" in df.columns else pd.Series(dtype=float)
+        vsh = ((avg - current) / std).where(std > 0)
+
+        df["p_fcf_5yr_avg"]    = avg.reindex(df.index)
+        df["p_fcf_5yr_std"]    = std.reindex(df.index)
+        df["p_fcf_vs_history"] = vsh.reindex(df.index)
+
+    log.info("attach_p_fcf_history: processed %d snapshot dates", len(dates))

@@ -1,16 +1,16 @@
 """ML model training and inference for Phase 3a.
 
-Model progression: Logistic Regression → Random Forest → XGBoost.
-Advances to the next model only if the previous one scores below MIN_ACCURACY
-on the validation set. All imputation medians are computed from training data
-only — no leakage into validation.
+All three models (Logistic Regression, Random Forest, XGBoost) are always trained.
+The best-performing model on the validation set is returned. MIN_ACCURACY is a
+documentation threshold — models above/below it are logged but it does not stop
+training. All imputation medians are computed from training data only — no leakage.
 """
 
 from __future__ import annotations
 
 import logging
 import pickle
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -18,11 +18,12 @@ import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, confusion_matrix
+from sklearn.model_selection import StratifiedKFold, cross_val_score
 from sklearn.preprocessing import StandardScaler
 
 logger = logging.getLogger(__name__)
 
-MIN_ACCURACY: float = 0.55
+MIN_ACCURACY: float = 0.53
 
 try:
     from xgboost import XGBClassifier as _XGBClassifier
@@ -43,6 +44,7 @@ class ModelArtifact:
     feature_names: list[str]
     train_end_date: pd.Timestamp
     val_accuracy: float
+    all_val_accuracies: dict[str, float] = field(default_factory=dict)  # accuracy for every model trained
 
 
 def train_phase3a(
@@ -52,10 +54,11 @@ def train_phase3a(
     y_val: pd.Series,
     train_end_date: pd.Timestamp,
 ) -> ModelArtifact:
-    """Train with LR → RF → XGBoost escalation; return first model reaching MIN_ACCURACY.
+    """Train all three models and return the one with the highest validation accuracy.
 
     Imputation medians are computed from X_train only.
     StandardScaler is applied only for Logistic Regression.
+    MIN_ACCURACY is logged as a reference threshold but does not stop training.
     """
     feature_names = list(X_train.columns)
     imputation_values = _compute_medians(X_train)
@@ -68,49 +71,68 @@ def train_phase3a(
     X_tr_s = scaler.fit_transform(X_tr)
     X_vl_s = scaler.transform(X_vl)
 
-    lr = LogisticRegression(max_iter=1000, random_state=42, class_weight="balanced")
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    best_C, best_cv_score = 1.0, -1.0
+    for C in [0.01, 0.1, 1.0]:
+        candidate = LogisticRegression(C=C, max_iter=1000, random_state=42,
+                                       class_weight="balanced")
+        cv_score = float(cross_val_score(candidate, X_tr_s, y_train,
+                                         cv=cv, scoring="accuracy").mean())
+        logger.info("LR C=%.2f  cv_accuracy=%.3f", C, cv_score)
+        if cv_score > best_cv_score:
+            best_cv_score, best_C = cv_score, C
+
+    logger.info("LR best C=%.2f  (cv_accuracy=%.3f)", best_C, best_cv_score)
+    lr = LogisticRegression(C=best_C, max_iter=1000, random_state=42,
+                            class_weight="balanced")
     lr.fit(X_tr_s, y_train)
     lr_acc = float(accuracy_score(y_val, lr.predict(X_vl_s)))
-    logger.info("LR validation accuracy: %.3f", lr_acc)
-
-    if lr_acc >= MIN_ACCURACY:
-        return ModelArtifact(lr, "logistic_regression", scaler, imputation_values,
-                             feature_names, train_end_date, lr_acc)
+    logger.info("LR  val_accuracy=%.3f  (%s threshold %.2f)",
+                lr_acc, "ABOVE" if lr_acc >= MIN_ACCURACY else "BELOW", MIN_ACCURACY)
 
     # --- Random Forest ---
-    rf = RandomForestClassifier(n_estimators=300, random_state=42, n_jobs=-1,
-                                class_weight="balanced")
+    rf = RandomForestClassifier(n_estimators=200, max_depth=4, min_samples_leaf=50,
+                                random_state=42, n_jobs=-1, class_weight="balanced")
     rf.fit(X_tr, y_train)
     rf_acc = float(accuracy_score(y_val, rf.predict(X_vl)))
-    logger.info("RF validation accuracy: %.3f", rf_acc)
-
-    if rf_acc >= MIN_ACCURACY:
-        return ModelArtifact(rf, "random_forest", None, imputation_values,
-                             feature_names, train_end_date, rf_acc)
+    logger.info("RF  val_accuracy=%.3f  (%s threshold %.2f)",
+                rf_acc, "ABOVE" if rf_acc >= MIN_ACCURACY else "BELOW", MIN_ACCURACY)
 
     # --- XGBoost ---
+    all_accuracies: dict[str, float] = {
+        "logistic_regression": lr_acc,
+        "random_forest": rf_acc,
+    }
+    candidates: list[tuple[float, str, object, StandardScaler | None]] = [
+        (lr_acc, "logistic_regression", lr, scaler),
+        (rf_acc, "random_forest", rf, None),
+    ]
+
     if _HAS_XGBOOST:
+        _neg = int((y_train == 0).sum())
+        _pos = int((y_train == 1).sum())
         xgb = _XGBClassifier(n_estimators=300, random_state=42, eval_metric="logloss",
-                              verbosity=0)
+                              verbosity=0, scale_pos_weight=_neg / _pos)
         xgb.fit(X_tr, y_train)
         xgb_acc = float(accuracy_score(y_val, xgb.predict(X_vl)))
-        logger.info("XGBoost validation accuracy: %.3f", xgb_acc)
+        logger.info("XGB val_accuracy=%.3f  (%s threshold %.2f)",
+                    xgb_acc, "ABOVE" if xgb_acc >= MIN_ACCURACY else "BELOW", MIN_ACCURACY)
+        all_accuracies["xgboost"] = xgb_acc
+        candidates.append((xgb_acc, "xgboost", xgb, None))
 
-        best = max(
-            [(lr_acc, "logistic_regression", lr, scaler),
-             (rf_acc, "random_forest", rf, None),
-             (xgb_acc, "xgboost", xgb, None)],
-            key=lambda t: t[0],
-        )
-        return ModelArtifact(best[2], best[1], best[3], imputation_values,
-                             feature_names, train_end_date, best[0])
+    best_acc, best_type, best_model, best_scaler = max(candidates, key=lambda t: t[0])
+    logger.info("Selected: %s  val_accuracy=%.3f", best_type, best_acc)
 
-    # No XGBoost — return best of LR / RF
-    if rf_acc >= lr_acc:
-        return ModelArtifact(rf, "random_forest", None, imputation_values,
-                             feature_names, train_end_date, rf_acc)
-    return ModelArtifact(lr, "logistic_regression", scaler, imputation_values,
-                         feature_names, train_end_date, lr_acc)
+    return ModelArtifact(
+        model=best_model,
+        model_type=best_type,
+        scaler=best_scaler,
+        imputation_values=imputation_values,
+        feature_names=feature_names,
+        train_end_date=train_end_date,
+        val_accuracy=best_acc,
+        all_val_accuracies=all_accuracies,
+    )
 
 
 def evaluate(

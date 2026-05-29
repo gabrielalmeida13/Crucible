@@ -8,6 +8,15 @@ data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 data/crucible.db
+data/crucible_picks.db
+data/fmp_cache.db
+data/cache/
+data/models/
+data/*.xlsx
+data/*.xls
+
+# Claude Code internal worktrees
+.claude/worktrees/
 
 # Python
 __pycache__/

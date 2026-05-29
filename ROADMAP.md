@@ -1,6 +1,6 @@
 # Crucible — ROADMAP.md
 
-> Current status: **Phase 2 in progress — EDGAR data migration underway**
+> Current status: **Phase 4 complete — prospective validation active from June 2026**
 > Update the status line above every time the phase changes.
 
 ---
@@ -8,224 +8,195 @@
 ## Overview
 
 ```
-Phase 0 → Phase 1 → Phase 2 → Phase 3 → Phase 4
-Setup     Pipeline   Backtest   ML        Continuous
-          + Filters  + Validation layer   refinement
+Phase 0 → Phase 1 → Phase 2 → Phase 2.5 → Phase 3 → Phase 4 → Phase 5
+Setup     Pipeline   Backtest   Scorer      3-Track   Operational  ML v2 +
+          + Filters  + EDGAR    complete    System    + Portfolio   Expansion
 
-  ✓ done    ✓ done    ← here
+  ✓ done    ✓ done    ✓ done    ✓ done      ✓ done    ✓ done      ← next
 ```
 
-Each phase must be **complete and validated** before moving to the next.
+---
+
+## System state — May 2026
+
+### Validated decisions (do not reopen without new evidence)
+
+**Universe:** SP500 (503 tickers) for all three tracks.
+Russell 1000 was tested and rejected — mid-caps dilute quality in Track 1
+and reduce Sharpe in Tracks 2 and 3 despite more candidates per month.
+
+**Holding period:** 1 month for all tracks.
+
+**Rotation:** deterministic (Track 1 → Track 2 → Track 3 → repeat) or
+weighted based on regime (see Phase 4.6). Given investor profile (20 years
+old, high risk tolerance), Track 2 is the primary engine.
+
+**ML (Phase 3a):** Random Forest at 57.9% validation accuracy was not
+deployed. The model improved in-sample but degraded in held-out. Root cause:
+validation set was iterated too many times. ML is not discarded — retested
+in Phase 5 with more prospective data and fresh held-out.
+
+### Backtest results (2013–2024, SP500)
+
+| Track | Total return | Excess vs SP500 | Sharpe | Hit rate | Unique tickers |
+|-------|-------------|-----------------|--------|----------|----------------|
+| 1 — Quality | 361.03% | +101.88% | 0.79 | 70.36% | 42 |
+| 2 — Growth | 420.95% | +161.80% | 0.72 | 68.81% | 62 |
+| 3 — Value | 298.94% | +39.80% | 0.61 | 73.48% | 116 |
+| SP500 benchmark | 259.15% | — | — | — | — |
+
+### Held-out results (2025-01 to 2026-05, SP500, ~16 months)
+
+| Track | Total return | Excess vs SP500 | Sharpe | Hit rate | Max drawdown |
+|-------|-------------|-----------------|--------|----------|--------------|
+| 1 — Quality | 8.48% | -17.22% | 0.25 | 59.00% | -7.43% |
+| 2 — Growth | 40.17% | +14.48% | 1.11 | 50.82% | -6.79% |
+| 3 — Value | 19.44% | -6.25% | 0.80 | 67.06% | -7.72% |
+| SP500 benchmark | 25.69% | — | — | — | — |
+
+**Interpretation:** Track 2 is the only track beating the benchmark in the
+held-out. The 2025-2026 regime continues to favour growth over quality and
+value — structurally consistent with training period. Track 1 and Track 3
+are not broken; they are regime-dependent and will recover in rotations.
+
+### First real pick — May 2026
+**APH (Amphenol Corporation)** — Track 2, Growth Inflection.
+Entry rationale: 58% revenue growth YoY Q1 2026, record orders (book-to-bill
+1.24x), 27.3% adjusted operating margin, AI data center pick-and-shovel play,
+P/E forward ~26 vs sector — reasonable for the growth profile.
+Entry P/FCF: 77.733 | Entry P/S: 7.845
 
 ---
 
-## Phase 0 — Project setup ✓
-**Status: Complete**
+## Prospective validation protocol (MANDATORY from June 2026)
 
-- [x] Create Git repository
-- [x] Configure Python environment with `uv` and `pyproject.toml`
-- [x] Create folder structure as defined in `CLAUDE.md`
-- [x] Configure `.env` and `.env.example`
-- [x] Set up global `logging`
-- [x] Create `config.py` with default values (thresholds, universe = `SP500`)
-- [x] First `pytest` run
-- [x] `CLAUDE.md` and `ROADMAP.md` committed to repository
+The system is frozen as of June 2026. No parameter changes permitted.
 
----
-
-## Phase 1 — Data pipeline + Fundamental filters ✓
-**Status: Complete**
-
-Filters implemented and functional. Initial backtest was run on a limited universe
-(large-cap subset) using FMP free tier data (Phase 1 only — not point-in-time).
-
-**Results from initial validation (Jan 2024 – Mar 2025, limited universe):**
-- Portfolio total return: 15.41% vs SPY 14.84% (+0.57% excess)
-- Sharpe ratio: 0.70 | Max drawdown: -6.13% | Hit rate: 79.49%
-- Average picks per month: 2.6 (limited by API data gaps — not statistically robust)
-
-**Important caveat:** 2.6 picks/month over 15 months is insufficient sample size.
-The direction of the thesis is promising but not confirmed. This is why Phase 2
-focuses on expanding sample size through a broader universe and longer history.
-
-### Filters implemented (Layer 1 — hard rules)
-
-| Metric                     | Threshold                 |
-|----------------------------|---------------------------|
-| 5-year average ROIC        | > 15%                     |
-| FCF positive               | ≥ 4 of last 5 years       |
-| Net Debt / EBITDA          | < 3x                      |
-| Revenue growth             | Positive in ≥ 3 of 5 years|
-| Gross margin               | Stable or growing         |
-
-**Sensitivity test results (ROIC threshold):**
-- ROIC > 10%: return 4.68%, Sharpe 0.02, hit rate 55% — significantly worse
-- ROIC > 12%: return 4.17%, Sharpe -0.02, hit rate 55% — worse than index
-- ROIC > 15%: return 15.41%, Sharpe 0.70, hit rate 79.49% — strong signal
-- Conclusion: 15% threshold validated; do not lower without strong evidence
+- Every monthly run produces a timestamped output in `data/monthly/{YYYY-MM}/`
+- All picks are logged to SQLite — never overwritten
+- Results reviewed May 2027 against actual prices
+- If a bug is found: document, fix, rerun — but do not look at new results
+  before the fix is applied
+- Any parameter change after June 2026 restarts the prospective clock
 
 ---
 
-## Phase 2 — Data migration to SEC EDGAR + Full backtest ← current
-**Status: In progress — 2.1 EDGAR migration underway**
+## Phase 4 — Operational system ✓ complete
 
-> **Why SEC EDGAR instead of FMP:**
-> The SEC EDGAR API is the primary US government data source. It is free,
-> unlimited, requires no API key, and provides true point-in-time data via
-> filing timestamps. XBRL structured data is available from 2009 (SEC mandate).
-> EDGAR also contains all historical filers including delisted companies,
-> which solves survivorship bias natively. FMP free tier was used for Phase 1
-> development only and has been replaced entirely.
+### Phase 4 completion summary — May 2026
 
-### 2.1 — EDGAR migration
-- [x] Add `edgartools` dependency; update `pyproject.toml` and `.env.example`
-- [x] Implement `download_edgar_bulk.py` for one-time `companyfacts.zip` download
-- [x] Rewrite `fetcher.py`: XBRL taxonomy map + `_parse_edgar_json` point-in-time parser
-- [ ] Use `yfinance` for price data only (fundamentals must come from EDGAR)
-- [ ] Validate EDGAR data: spot-check revenue/net income against known values for 5 tickers
-- [ ] Confirm all historical S&P 500 filers are present including delisted companies
-- [ ] Update `tests/test_fetcher.py` for new EDGAR-based interface
+Everything below was built, tested, and is running in production as of May 2026.
+The system is frozen for prospective validation from June 2026.
 
-### 2.2 — Universe expansion for statistical robustness
-- [ ] Expand from S&P 500 to Russell 1000 (or broader) to increase picks per month
-- [ ] Target: average ≥ 10–15 picks per monthly scan (vs. 2.6 in Phase 1)
-- [ ] Rerun filters on expanded universe and validate shortlist quality
+**Core operational pipeline**
+- [x] `crucible/portfolio.py` — position evaluator: HOLD / REINFORCE / REVIEW / EXIT_SIGNAL / DATA_MISSING
+- [x] `scripts/run_monthly.py` — unified entry point for all three tracks with portfolio review and allocation advice
+- [x] SQLite prospective logging (`data/crucible_picks.db`) with atomic JSON manifest per run
 
-### 2.3 — Walk-forward backtest (2009–present)
-- [ ] Historical range: 2009–present (~15 years, full XBRL coverage)
-- [ ] Walk-forward implementation:
-  - Train window: months 1–24
-  - Test: month 25
-  - Advance 1 month, repeat
-- [ ] Comparison metrics: total return vs. S&P 500, Sharpe, max drawdown, hit rate
-- [ ] Threshold sensitivity retest on full universe
-- [ ] Survivorship bias check: delisted companies included in historical universe
-- [ ] Point-in-time check: no filing used before its `filed` date
-- [ ] Backtest report documented
+**Three-track screener (4.1–4.4)**
+- [x] `crucible/tracks/track1_quality.py` — Quality Compounder: ROIC, FCF consistency, debt, margin stability
+- [x] `crucible/tracks/track2_growth.py` — Growth Inflection: revenue acceleration, margin expansion, momentum gate
+- [x] `crucible/tracks/track3_value.py` — Value Recovery: P/FCF vs history, balance sheet health, recovery signals
+- [x] Track 2 earnings quality signals: `asset_growth_yoy`, `deferred_revenue_growth`, `eps_surprise_last_q` (4.7)
 
----
+**Regime detection (4.6)**
+- [x] `crucible/regime.py` — three-state rules-based regime (GROWTH / DEFENSIVE / HIGH_VOL)
+  using VIX, 10y–2y yield curve spread, and SP500 12-month momentum (all free via yfinance)
+- [x] Regime allocation hint integrated into `run_monthly.py` CLI output
 
-## Phase 3 — ML layer
-**Goal:** improve the composite score using a trained model.
+**Alerts (4.5)**
+- [x] `crucible/alerts.py` — EXIT_SIGNAL transitions, consecutive negative momentum (2+ months),
+  HOLD→REVIEW downgrades; Telegram (preferred) and email (fallback) channels
+- [x] `scripts/check_alerts.py` — lightweight SQLite-only daily cron script (no EDGAR needed)
+- [x] Monthly reminder on the 1st of each month if screener not yet run
+- [x] Alert dispatch integrated into `scripts/run_monthly.py` (step 12a–12c)
 
-> **Data available for ML:** 2009–present via EDGAR, all US public companies.
-> Walk-forward validation is mandatory throughout — no exceptions.
-
-### Overfitting mitigation strategy
-
-With 15 years of data, overfitting is a real risk. Mitigations in place:
-
-1. **Walk-forward only** — model never sees test period during training
-2. **Feature count discipline** — start with fewer than 15 features;
-   add only with clear economic rationale, not because it improves backtest
-3. **Out-of-sample held-out period** — reserve 2023–present as final test set;
-   do not touch it until the model is fully specified
-4. **Benchmark comparison** — a model that barely beats the rules-based score
-   from Phase 1 is not worth the added complexity; set a minimum improvement bar
-5. **Regime awareness** — test separately on pre-2020, 2020–2022, and 2022–present
-   to check if the model degrades in specific macro regimes
-
-### 3a — Fundamental quality classifier (start here)
-- [ ] Define feature set from EDGAR fundamentals:
-  - ROIC level and YoY direction
-  - FCF margin and consistency
-  - Gross margin level and trend
-  - Revenue growth rate and acceleration
-  - Net debt / EBITDA and direction
-  - Asset turnover
-  - Accruals ratio (earnings quality signal)
-- [ ] Target: binary — will ROIC be higher in N+1 than in N?
-  - Rationale: directional momentum is far more tractable than predicting
-    absolute values 3 years out; markets and macro cycles make N+3 targets noisy
-- [ ] Feature engineering in `ml/features.py`
-- [ ] Training pipeline with walk-forward in `ml/model.py`
-- [ ] Model progression: Logistic Regression → Random Forest → XGBoost
-  - Start simple; only add complexity if simpler model fails clearly
-- [ ] Compare performance vs. rules-based score from Phase 1
-- [ ] Integrate into dashboard as additional column — do not replace rules score
-
-### 3b — Ranking score (optional, after 3a validated)
-- [ ] Replace weighted composite score with learning-to-rank model (e.g., LambdaMART)
-- [ ] Target: relative return vs. S&P 500 benchmark at 12 months
-- [ ] Requires larger pick sample — validate universe size before starting
-
-### 3c — Accounting red flag detection (optional, after 3a validated)
-- [ ] Beneish M-score variant with EDGAR-derived features
-- [ ] Additional signals: accruals, revenue/receivables divergence, asset growth anomalies
-- [ ] Output: binary flag for earnings quality risk
-- [ ] Integrate as negative score modifier, not hard filter
-
-**Exit criterion:** ML model improves hit rate by ≥ 3 percentage points vs.
-rules-based score, validated on out-of-sample data (2023–present held-out set).
-If this bar is not met, document why and do not force the model into production.
+**Dashboard (4.8)**
+- [x] Streamlit dashboard — Monthly Picks, Portfolio, Manual Import (XLSX+CSV), History, Performance
+- [x] Regime indicator widget on Monthly Picks tab: coloured badge + VIX / spread / SP500 momentum
+- [x] Allocation advice in Portfolio tab: budget widget, calls `allocation_advice()`, renders as Markdown
+- [x] Performance tab: prospective picks since June 2026, return_pct coloured green/red,
+  SP500 benchmark comparison, per-track breakdown
+- [x] Manual Import tab replaces XTB API (discontinued March 2025)
 
 ---
 
-## Phase 4 — Universe expansion + Continuous refinement
-**Goal:** expand to European and broader XTB universe; add operational features.
+## Phase 5 — ML v2 + Expansion
 
-### 4.1 — European universe expansion (staged)
+> Do not start until Phase 4.5-4.7 are complete AND at least 6 months of
+> prospective data exist (December 2026 earliest).
 
-> **Data source decision required before starting this phase.**
-> SEC EDGAR covers US-listed companies only. European companies require a separate
-> source. Options to evaluate at Phase 4 start:
-> - **SimFin** (free, covers major European large-caps, limited history)
-> - **FMP paid** (~$20/month, broader coverage, reasonable point-in-time)
-> - **Open source scraping** (Stockanalysis.com, company IR pages — fragile)
-> Evaluate based on coverage of target universe and data quality at that time.
+### 5.1 — ML for Track 2 (learning-to-rank within shortlist)
 
-| Step | Universe ID    | Action                                                            |
-|------|----------------|-------------------------------------------------------------------|
-| 4.1a | `EUROPE_LARGE` | Add LSE, Deutsche Börse, Euronext Paris (~150 companies)          |
-| 4.1b | `JAPAN_ADR`    | Add Japanese large-caps via ADRs / European dual listings (~80)   |
-| 4.1c | `XTB_FULL`     | Expand to all XTB-available stocks with sufficient data           |
+Previous approach (Phase 3a) tried to classify outperformers across all 500 stocks.
+New approach: rank companies within the already-filtered Track 2 shortlist.
+This is a narrower, more tractable problem with cleaner signal.
 
-For each expansion step:
-- [ ] Confirm data source availability and point-in-time quality for new tickers
-- [ ] Enable region-aware normalization in `scorer.py` (IFRS ≠ US GAAP)
-- [ ] Calibrate Layer 1 thresholds per region
-- [ ] Add FX cost penalty in `fx.py` for non-EUR denominated stocks (XTB charges 0.5%)
-- [ ] Rerun backtest on expanded universe before using in production
+- [ ] Training window: 2013–2025 (includes more regime diversity than before)
+- [ ] Held-out: prospective data from June 2026 onwards (truly clean)
+- [ ] Target: rank within Track 2 shortlist by 3-month forward return
+- [ ] Features: all Track 2 scorer components + momentum_3m + insider_buy_ratio
+      + eps_surprise_last_q + deferred_revenue_growth (new from Phase 4.7)
+- [ ] Model: LightGBM LambdaMART (learning-to-rank, not binary classification)
+- [ ] Exit criterion: model improves hit rate by ≥ 3pp vs score-based ranking
+      on prospective held-out — not on backtested data
 
-### 4.2 — Operational features
-- [ ] Automatic alerts (e.g., a shortlist company drops out of filters mid-month)
-- [ ] Insider transactions signal (available free via EDGAR Form 4)
-- [ ] Short interest as a negative scoring factor
-- [ ] Institutional holdings changes (EDGAR 13F filings — also free)
-- [ ] Monthly notification (email or Telegram bot)
+### 5.2 — EPS revisions signal (requires external data)
+
+Academic research (MSCI, Robeco) consistently identifies analyst EPS revision
+direction as one of the strongest alpha signals. Not currently implementable
+for free — requires a data provider with consensus estimates.
+
+Options to evaluate at Phase 5 start:
+- Alpha Vantage (limited free tier, paid for full coverage)
+- Quandl/Nasdaq Data Link (academic pricing available)
+- Evaluate cost vs. signal strength with 6+ months of prospective data first
+
+- [ ] Evaluate data source cost and coverage
+- [ ] If viable: add `eps_revision_direction` (up/flat/down over last 30 days)
+      as a binary modifier to Track 2 composite score
+
+### 5.3 — Universe expansion to Europe
+
+> EDGAR covers US only. European data requires SimFin (free, limited) or
+> FMP paid (~$20/month). Evaluate budget at Phase 5 start.
+
+- [ ] Add `EUROPE_LARGE` universe (LSE, Deutsche Börse, Euronext Paris)
+- [ ] Enable IFRS normalisation in scorer
+- [ ] Calibrate thresholds per region
+- [ ] Add FX cost penalty in `fx.py` (XTB charges 0.5% conversion)
+- [ ] Full backtest before production use
+
+### 5.4 — Options/hedging (research only)
+
+> Not for real capital until validated over ≥ 12 months prospectively.
+
+- Protective puts on Track 2 positions with large unrealised gains (>100%)
+- Covered calls on Track 1 positions for income generation
+- Track 4 (Short candidates): inverse of Track 1 filters as put targets
 
 ---
 
-## Cross-cutting notes
+## Cross-cutting principles
 
-**Survivorship bias**
-The historical universe for each scan must be the universe *of that month*, not
-the current one. EDGAR contains all historical filers regardless of current listing
-status — companies that were delisted, acquired, or went bankrupt are still in
-the database with their historical filings. This is one of EDGAR's key advantages
-over yfinance and free FMP tiers.
+**Point-in-time data:** EDGAR filings filtered by `filed` ≤ snapshot date always.
 
-**Point-in-time data**
-Every filing in EDGAR has a `filed` date. A 10-K for fiscal year ending December 2020
-filed in February 2021 must not be used in a January 2021 backtest scan.
-Always filter on `filed` ≤ scan date. Never use period end date as a proxy.
+**Sector normalisation:** all metrics compared within GICS sector peer groups.
 
-**Data range**
-XBRL is available from 2009. This is the hard floor for fundamental data.
-Earlier filings exist in EDGAR but are unstructured (HTML, PDF) and inconsistent
-between companies. Do not attempt to parse pre-2009 fundamentals.
+**The model is a tool, not an oracle:** monthly output is a starting point
+for human investigation, not a buy instruction. Debate top candidates with
+an AI assistant using the full reasoning export before deciding.
 
-**Accounting comparability (US-only phase)**
-Within the US universe all companies use US GAAP — direct comparison is valid.
-Sector normalization is still mandatory: compare ROIC, margin, and valuation
-metrics within the same GICS sector, not across the full universe.
+**Prospective validation is the only clean validation:** the June 2026
+prospective clock is the definitive test. Any modification after June 2026
+restarts the clock.
 
-**Overfitting with long history**
-More historical data is better for robustness, but only if the walk-forward
-protocol is strictly followed. The held-out period (2023–present) must not be
-touched until the model specification is finalized in Phase 3. Any parameter
-tuning that uses the held-out period invalidates it.
+**Crucible is a living project:** refined continuously as prospective data
+accumulates, regimes change, and new sources become available. Every major
+parameter change requires a new held-out before deployment.
 
-**The model is a tool, not an oracle**
-The monthly output is a starting point for further investigation, not a buy
-instruction. The final decision is always human.
+**Investor profile:** age 20, high risk tolerance, long time horizon.
+Track 2 (Growth Inflection) is the primary engine. Track 1 and Track 3
+provide diversification and drawdown protection. Monthly investment: ~€100.
+Strategy: build individual positions methodically over years, parallel to
+core ETF allocation (S&P 500, QVDE).

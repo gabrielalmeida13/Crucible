@@ -19,6 +19,7 @@ import io
 import json
 import logging
 import math
+import os
 from datetime import timezone
 from functools import lru_cache
 from pathlib import Path
@@ -133,6 +134,67 @@ def _load_cik_mapping(
 # ---------------------------------------------------------------------------
 # Point-in-time EDGAR JSON parser
 # ---------------------------------------------------------------------------
+
+
+@lru_cache(maxsize=300)
+@lru_cache(maxsize=600)
+def _load_dei_shares_cached(
+    padded_cik: str,
+    edgar_dir_str: str,
+) -> list[dict[str, Any]]:
+    """Load EntityCommonStockSharesOutstanding records from the dei namespace. LRU-cached.
+
+    Returns [{end, val, filed, form}, ...] with NO date filter applied.
+    Includes all form types (10-K, 10-Q, etc.) — caller applies the as_of_date filter.
+    """
+    json_path = Path(edgar_dir_str) / f"CIK{padded_cik}.json"
+    if not json_path.exists():
+        return []
+    raw: dict[str, Any] = json.loads(json_path.read_bytes())
+    dei: dict[str, Any] = raw.get("facts", {}).get("dei", {})
+    concept = dei.get("EntityCommonStockSharesOutstanding", {})
+    recs: list[dict] = concept.get("units", {}).get("shares", [])
+    result: list[dict[str, Any]] = []
+    for rec in recs:
+        filed = rec.get("filed", "")
+        val = rec.get("val")
+        if not filed or val is None:
+            continue
+        try:
+            val_f = float(val)
+        except (TypeError, ValueError):
+            continue
+        if val_f <= 0:
+            continue
+        result.append({
+            "end": rec.get("end", ""),
+            "val": val_f,
+            "filed": filed,
+            "form": rec.get("form", ""),
+        })
+    return result
+
+
+def get_shares_outstanding(
+    cik: str,
+    as_of_date: pd.Timestamp,
+    edgar_dir: Path = Path("data/raw/edgar/companyfacts"),
+) -> float | None:
+    """Return shares outstanding from EDGAR DEI filings as of as_of_date (point-in-time).
+
+    Takes the most recently filed value on or before as_of_date.  When multiple
+    records share the same filed date (e.g. multi-class share structures), sums
+    them so that the total share count is correct.
+    """
+    padded_cik = str(cik).zfill(10)
+    records = _load_dei_shares_cached(padded_cik, str(edgar_dir))
+    as_of_str = as_of_date.strftime("%Y-%m-%d")
+    eligible = [r for r in records if r["filed"] <= as_of_str]
+    if not eligible:
+        return None
+    latest_filed = max(r["filed"] for r in eligible)
+    same_date = [r for r in eligible if r["filed"] == latest_filed]
+    return sum(r["val"] for r in same_date)
 
 
 @lru_cache(maxsize=300)
@@ -316,11 +378,15 @@ def _edgar_to_panel_rows(
 def _edgar_to_info_row(
     ticker: str,
     facts: dict[str, list[dict[str, Any]]],
+    cik: str | None = None,
+    as_of_date: pd.Timestamp | None = None,
+    edgar_dir: Path = Path("data/raw/edgar/companyfacts"),
 ) -> dict[str, Any]:
-    """Build an info row from EDGAR facts + yfinance sector/market-cap data.
+    """Build an info row from EDGAR facts + yfinance sector/price data.
 
-    Sector and sub_industry come from yfinance fast_info (non-fundamental; acceptable).
-    Valuation multiples use current market cap from yfinance + most recent EDGAR fundamentals.
+    Market cap = current price (yfinance) × shares outstanding (EDGAR point-in-time).
+    Valuation multiples use 5-year average fundamentals from EDGAR for stability.
+    Sector and sub_industry come from yfinance (non-fundamental; acceptable).
     """
     row: dict[str, Any] = {
         "ticker": ticker,
@@ -332,40 +398,89 @@ def _edgar_to_info_row(
         "ev_ebitda": None,
     }
 
-    mkt_cap: float | None = None
+    price: float | None = None
     try:
         yf_ticker = yf.Ticker(ticker)
         info = yf_ticker.info
         row["sector"] = info.get("sector") or None
         row["sub_industry"] = info.get("industry") or None
-        mkt_cap = _to_float(info.get("marketCap"))
+        price = _to_float(info.get("currentPrice") or info.get("regularMarketPrice"))
     except Exception:
         logger.debug("yfinance info unavailable for %s", ticker)
+
+    # Market cap from EDGAR shares (point-in-time) × current price
+    shares: float | None = None
+    if cik and as_of_date:
+        shares = get_shares_outstanding(cik, as_of_date, edgar_dir)
+    mkt_cap = price * shares if (price is not None and shares is not None) else None
 
     def _latest_val(metric: str) -> float | None:
         records = facts.get(metric)
         return _to_float(records[0]["val"]) if records else None
 
-    # Compute derived values needed for multiples
-    op_inc = _latest_val("Operating Income")
-    da = _latest_val("Depreciation Amortization")
-    ocf = _latest_val("Operating Cash Flow")
-    capex = _latest_val("Capital Expenditure")
+    def _avg_5yr(metric: str, n: int = 5) -> float | None:
+        """Average of the n most recent annual values for a raw EDGAR metric."""
+        records = facts.get(metric, [])
+        vals = [_to_float(r["val"]) for r in records[:n]]
+        valid = [v for v in vals if v is not None]
+        return sum(valid) / len(valid) if valid else None
+
+    def _avg_fcf_5yr(n: int = 5) -> float | None:
+        """5-year average FCF = avg(OCF - |CapEx|) aligned by fiscal year."""
+        ocf_recs = facts.get("Operating Cash Flow", [])
+        capex_recs = facts.get("Capital Expenditure", [])
+        if not ocf_recs or not capex_recs:
+            return None
+        capex_by_year = {r["end"][:4]: _to_float(r["val"]) for r in capex_recs}
+        vals: list[float] = []
+        for r in ocf_recs:
+            if len(vals) >= n:
+                break
+            ocf_v = _to_float(r["val"])
+            capex_v = capex_by_year.get(r["end"][:4])
+            if ocf_v is not None and capex_v is not None:
+                vals.append(ocf_v - abs(capex_v))
+        return sum(vals) / len(vals) if vals else None
+
+    def _avg_ebitda_5yr(n: int = 5) -> float | None:
+        """5-year average EBITDA = avg(Operating Income + D&A) aligned by fiscal year."""
+        oi_recs = facts.get("Operating Income", [])
+        da_recs = facts.get("Depreciation Amortization", [])
+        if not oi_recs or not da_recs:
+            return None
+        da_by_year = {r["end"][:4]: _to_float(r["val"]) for r in da_recs}
+        vals: list[float] = []
+        for r in oi_recs:
+            if len(vals) >= n:
+                break
+            oi_v = _to_float(r["val"])
+            da_v = da_by_year.get(r["end"][:4])
+            if oi_v is not None and da_v is not None:
+                vals.append(oi_v + da_v)
+        return sum(vals) / len(vals) if vals else None
+
     ltd = _latest_val("Long Term Debt") or 0.0
     std = _latest_val("Short Term Debt") or 0.0
     cash = _latest_val("Cash And Cash Equivalents") or 0.0
-
-    net_income = _latest_val("Net Income")
-    ebitda = (op_inc + da) if (op_inc is not None and da is not None) else None
-    fcf = (ocf - abs(capex)) if (ocf is not None and capex is not None) else None
     total_debt = ltd + std
 
-    if mkt_cap and net_income and net_income > 0:
-        row["p_e"] = mkt_cap / net_income
-    if mkt_cap and fcf and fcf > 0:
-        row["p_fcf"] = mkt_cap / fcf
-    if mkt_cap and ebitda and ebitda > 0:
-        row["ev_ebitda"] = (mkt_cap + total_debt - cash) / ebitda
+    fcf_5yr = _avg_fcf_5yr()
+    ebitda_5yr = _avg_ebitda_5yr()
+    ni_5yr_vals = [_to_float(r["val"]) for r in facts.get("Net Income", [])[:5]]
+    ni_5yr_avg = (
+        sum(v for v in ni_5yr_vals if v is not None) / len([v for v in ni_5yr_vals if v is not None])
+        if any(v is not None for v in ni_5yr_vals) else None
+    )
+
+    _MAX_MULTIPLE = 200.0
+    if mkt_cap and fcf_5yr and fcf_5yr > 0:
+        row["p_fcf"] = min(mkt_cap / fcf_5yr, _MAX_MULTIPLE)
+    if mkt_cap and ebitda_5yr and ebitda_5yr > 0:
+        ev = mkt_cap + total_debt - cash
+        if ev > 0:
+            row["ev_ebitda"] = min(ev / ebitda_5yr, _MAX_MULTIPLE)
+    if mkt_cap and ni_5yr_avg and ni_5yr_avg > 0:
+        row["p_e"] = min(mkt_cap / ni_5yr_avg, _MAX_MULTIPLE)
 
     return row
 
@@ -396,48 +511,115 @@ def fetch_sp500_tickers() -> list[str]:
     return tickers
 
 
-def fetch_russell1000_tickers(url: str) -> list[str]:
-    """Download iShares IWB holdings CSV and return equity ticker symbols.
+_IWB_CSV_URL = (
+    "https://www.ishares.com/us/products/239707/ishares-russell-1000-etf"
+    "/1467271812596.ajax?fileType=csv&fileName=IWB_holdings&dataType=fund"
+)
+_IWB_CSV_UA = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+_RUSSELL1000_FALLBACK_PATH = Path("data/raw/russell1000_tickers.txt")
+# The fallback file contains SP500 + SP400 (903 tickers), a practical approximation
+# of the Russell 1000 built from Wikipedia when iShares CSV is bot-blocked.
 
-    The iShares CSV has 2 preamble rows before the actual header. We locate the
-    'Ticker' column header robustly, parse from there, and filter to Equity assets.
+
+def _parse_iwb_csv(content: bytes) -> list[str]:
+    """Parse iShares IWB holdings CSV, returning equity tickers only.
+
+    The CSV has several metadata rows before the actual header row.
+    Filters to Asset Class == "Equity", strips empty and derivative tickers.
     """
-    resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0 Crucible"}, timeout=30)
-    resp.raise_for_status()
+    text = content.decode("utf-8", errors="replace")
+    lines = text.splitlines()
 
-    lines = resp.text.splitlines()
+    # Locate the header row (contains "Ticker")
     header_idx: int | None = None
     for i, line in enumerate(lines):
-        # iShares header row starts with "Ticker," or contains it as first field
-        if line.startswith("Ticker,") or line.startswith('"Ticker",'):
+        if "Ticker" in line:
             header_idx = i
             break
 
     if header_idx is None:
-        raise ValueError(
-            "Could not locate 'Ticker' column header in iShares IWB CSV. "
-            f"First 5 lines: {lines[:5]}"
-        )
+        raise ValueError("Could not locate 'Ticker' header row in iShares CSV")
 
-    csv_text = "\n".join(lines[header_idx:])
-    df = pd.read_csv(io.StringIO(csv_text))
+    data_text = "\n".join(lines[header_idx:])
+    df = pd.read_csv(io.StringIO(data_text), on_bad_lines="skip")
 
-    if "Asset Class" in df.columns:
-        df = df[df["Asset Class"] == "Equity"]
+    # Filter to equity rows only
+    asset_col = next(
+        (c for c in df.columns if c.strip().lower() in ("asset class", "assetclass")),
+        None,
+    )
+    if asset_col:
+        df = df[df[asset_col].astype(str).str.strip().str.lower() == "equity"]
 
     tickers = (
         df["Ticker"]
         .dropna()
         .astype(str)
         .str.strip()
-        .replace("", pd.NA)
-        .dropna()
-        .str.replace(".", "-", regex=False)
         .tolist()
     )
+    # Drop empty strings and cash/derivative placeholders (contain "-")
+    tickers = [t for t in tickers if t and "-" not in t]
+    return sorted(set(tickers))
 
-    logger.info("Fetched %d Russell 1000 tickers from iShares IWB", len(tickers))
-    return tickers
+
+def fetch_russell1000_tickers() -> list[str]:
+    """Return Russell 1000 constituents from the iShares IWB holdings CSV.
+
+    Primary:  HTTP request to the iShares IWB CSV download endpoint.
+    Fallback: data/raw/russell1000_tickers.txt (one ticker per line).
+
+    Raises RuntimeError with download instructions if both sources are unavailable.
+    """
+    # Primary: iShares IWB CSV
+    try:
+        resp = requests.get(
+            _IWB_CSV_URL,
+            headers={"User-Agent": _IWB_CSV_UA},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        # Guard against bot-protection pages returning HTML with a 200 status
+        if resp.content[:20].lstrip().startswith(b"<"):
+            raise ValueError("iShares returned HTML instead of CSV (bot protection active)")
+        tickers = _parse_iwb_csv(resp.content)
+        if tickers:
+            logger.info("Russell 1000: %d tickers from iShares IWB CSV", len(tickers))
+            return tickers
+        logger.warning("iShares IWB CSV returned 0 equity tickers; trying local fallback")
+    except Exception as exc:
+        logger.warning("iShares IWB CSV fetch failed: %s", exc)
+
+    # Fallback: local text file
+    if _RUSSELL1000_FALLBACK_PATH.exists():
+        tickers = [
+            ln.strip()
+            for ln in _RUSSELL1000_FALLBACK_PATH.read_text().splitlines()
+            if ln.strip()
+        ]
+        if tickers:
+            logger.info(
+                "Russell 1000: %d tickers from local fallback %s",
+                len(tickers),
+                _RUSSELL1000_FALLBACK_PATH,
+            )
+            return tickers
+
+    print(
+        "\nCould not fetch Russell 1000 tickers automatically.\n"
+        "To resolve this, download the holdings manually:\n"
+        "  1. Go to https://www.ishares.com/us/products/239707/ishares-russell-1000-etf\n"
+        "  2. Click 'Download Holdings' → CSV\n"
+        "  3. Extract the Ticker column (equity rows only) and save one ticker per line to:\n"
+        f"     {_RUSSELL1000_FALLBACK_PATH.resolve()}\n"
+    )
+    raise RuntimeError(
+        "Russell 1000 tickers unavailable: iShares CSV unreachable and local fallback "
+        f"not found at {_RUSSELL1000_FALLBACK_PATH}."
+    )
 
 
 def fetch_financials(
@@ -510,7 +692,7 @@ def fetch_info(
             continue
         try:
             facts = _parse_edgar_json(cik, as_of_date, edgar_dir)
-            records.append(_edgar_to_info_row(ticker, facts))
+            records.append(_edgar_to_info_row(ticker, facts, cik, as_of_date, edgar_dir))
         except Exception:
             logger.warning("fetch_info: error for %s", ticker, exc_info=True)
             records.append(_make_empty_info_row(ticker))

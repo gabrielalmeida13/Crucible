@@ -1,0 +1,11 @@
+{
+  "run_timestamp": "2026-05-26T00:00:00+00:00",
+  "universe": "SP500",
+  "tracks_run": [
+    2
+  ],
+  "n_candidates_per_track": {
+    "2": 9
+  },
+  "system_version": "7339c2bc81169aefe4ab16cb75b34a1767c97b03"
+}

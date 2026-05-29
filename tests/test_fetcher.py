@@ -688,67 +688,123 @@ def test_parse_edgar_json_still_applies_date_filter_on_cached_facts(tmp_path: Pa
 
 
 # ---------------------------------------------------------------------------
-# fetch_russell1000_tickers — CSV parsing
+# fetch_russell1000_tickers — iShares IWB CSV approach
 # ---------------------------------------------------------------------------
 
 
-def test_fetch_russell1000_tickers_parses_standard_format(monkeypatch: pytest.MonkeyPatch) -> None:
-    from crucible.fetcher import fetch_russell1000_tickers
-    import crucible.fetcher as fetcher_mod
+def _iwb_csv(tickers: list[str], include_non_equity: bool = False) -> bytes:
+    """Build a minimal iShares IWB-style CSV with the given equity tickers."""
+    header_meta = "iShares Russell 1000 ETF,IWB\nAs of Date,2024-01-01\n\n"
+    col_header = "Ticker,Name,Asset Class,Weight (%)\n"
+    rows = "\n".join(f"{t},Company {t},Equity,0.1" for t in tickers)
+    if include_non_equity:
+        rows += "\nXXX,Cash Component,Cash,1.0\n-,Derivative,Other,0.0"
+    return (header_meta + col_header + rows + "\n").encode()
 
-    csv_body = (
-        "iShares Russell 1000 ETF\n"
-        "Holdings as of 2024-01-05\n"
-        "Ticker,Name,Asset Class,Market Value,Weight (%)\n"
-        "MSFT,MICROSOFT CORP,Equity,1000000,3.5\n"
-        "AAPL,APPLE INC,Equity,900000,3.1\n"
-        "CASH_COMPONENT,,Cash and/or Derivatives,100000,0.1\n"
-    )
 
-    class _FakeResp:
-        text = csv_body
-        def raise_for_status(self) -> None: pass
+def test_parse_iwb_csv_extracts_equity_tickers() -> None:
+    """_parse_iwb_csv must return only equity tickers."""
+    from crucible.fetcher import _parse_iwb_csv
 
-    monkeypatch.setattr(fetcher_mod.requests, "get", lambda *a, **kw: _FakeResp())
-    result = fetch_russell1000_tickers("http://fake-url")
-    assert "MSFT" in result
+    result = _parse_iwb_csv(_iwb_csv(["AAPL", "MSFT", "GOOGL"]))
+    assert set(result) == {"AAPL", "MSFT", "GOOGL"}
+
+
+def test_parse_iwb_csv_filters_out_non_equity() -> None:
+    """Cash and derivative rows must not appear in the output."""
+    from crucible.fetcher import _parse_iwb_csv
+
+    result = _parse_iwb_csv(_iwb_csv(["AAPL"], include_non_equity=True))
     assert "AAPL" in result
-    # Cash/derivatives row has no "Equity" Asset Class — must be excluded
-    assert "CASH_COMPONENT" not in result
+    assert "XXX" not in result  # cash row
+    assert "-" not in result    # derivative placeholder
 
 
-def test_fetch_russell1000_tickers_normalises_dots_to_dashes(monkeypatch: pytest.MonkeyPatch) -> None:
-    from crucible.fetcher import fetch_russell1000_tickers
-    import crucible.fetcher as fetcher_mod
+def test_parse_iwb_csv_strips_dash_tickers() -> None:
+    """Tickers containing '-' (cash/derivatives) must be excluded."""
+    from crucible.fetcher import _parse_iwb_csv
 
-    csv_body = (
-        "iShares Russell 1000 ETF\n"
-        "Holdings as of 2024-01-05\n"
+    csv_bytes = (
         "Ticker,Name,Asset Class\n"
-        "BRK.B,BERKSHIRE HATHAWAY B,Equity\n"
-    )
+        "AAPL,Apple,Equity\n"
+        "-,Cash,Cash\n"
+        "BRK-B,Berkshire,Equity\n"
+    ).encode()
+    result = _parse_iwb_csv(csv_bytes)
+    assert "AAPL" in result
+    # BRK-B contains '-' and must be excluded
+    assert "BRK-B" not in result
+    # bare '-' must be excluded
+    assert "-" not in result
 
-    class _FakeResp:
-        text = csv_body
-        def raise_for_status(self) -> None: pass
 
-    monkeypatch.setattr(fetcher_mod.requests, "get", lambda *a, **kw: _FakeResp())
-    result = fetch_russell1000_tickers("http://fake-url")
-    assert "BRK-B" in result
-    assert "BRK.B" not in result
+def test_parse_iwb_csv_deduplicates() -> None:
+    """Duplicate tickers must be deduplicated."""
+    from crucible.fetcher import _parse_iwb_csv
+
+    result = _parse_iwb_csv(_iwb_csv(["AAPL", "AAPL", "MSFT"]))
+    assert result.count("AAPL") == 1
 
 
-def test_fetch_russell1000_tickers_raises_if_no_header(monkeypatch: pytest.MonkeyPatch) -> None:
-    from crucible.fetcher import fetch_russell1000_tickers
+def test_fetch_russell1000_tickers_uses_csv_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    """fetch_russell1000_tickers must try the iShares CSV before the file fallback."""
     import crucible.fetcher as fetcher_mod
 
-    class _FakeResp:
-        text = "No useful content here\nJust garbage\n"
-        def raise_for_status(self) -> None: pass
+    fake_tickers = [f"T{i:04d}" for i in range(600)]
 
-    monkeypatch.setattr(fetcher_mod.requests, "get", lambda *a, **kw: _FakeResp())
-    with pytest.raises(ValueError, match="Ticker"):
-        fetch_russell1000_tickers("http://fake-url")
+    class FakeResponse:
+        status_code = 200
+        content = fetcher_mod._iwb_csv.__func__(None, fake_tickers) if False else (
+            "Ticker,Name,Asset Class\n" +
+            "\n".join(f"T{i:04d},Co,Equity" for i in range(600)) + "\n"
+        ).encode()
+
+        def raise_for_status(self) -> None:
+            pass
+
+    monkeypatch.setattr(fetcher_mod.requests, "get", lambda *a, **kw: FakeResponse())
+    result = fetcher_mod.fetch_russell1000_tickers()
+    assert len(result) == 600
+
+
+def test_fetch_russell1000_tickers_falls_back_to_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When the HTTP request fails, fetch_russell1000_tickers reads the local file."""
+    import crucible.fetcher as fetcher_mod
+
+    fallback_tickers = [f"T{i:04d}" for i in range(700)]
+    fallback_file = tmp_path / "russell1000_tickers.txt"
+    fallback_file.write_text("\n".join(fallback_tickers))
+
+    monkeypatch.setattr(fetcher_mod, "_RUSSELL1000_FALLBACK_PATH", fallback_file)
+    monkeypatch.setattr(
+        fetcher_mod.requests,
+        "get",
+        lambda *a, **kw: (_ for _ in ()).throw(OSError("network error")),
+    )
+    result = fetcher_mod.fetch_russell1000_tickers()
+    assert result == fallback_tickers
+
+
+def test_fetch_russell1000_tickers_raises_when_all_sources_fail(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """RuntimeError must be raised when HTTP fails and local file is absent."""
+    import crucible.fetcher as fetcher_mod
+
+    monkeypatch.setattr(
+        fetcher_mod, "_RUSSELL1000_FALLBACK_PATH", tmp_path / "nonexistent.txt"
+    )
+    monkeypatch.setattr(
+        fetcher_mod.requests,
+        "get",
+        lambda *a, **kw: (_ for _ in ()).throw(OSError("network error")),
+    )
+    with pytest.raises(RuntimeError):
+        fetcher_mod.fetch_russell1000_tickers()
 
 
 # ---------------------------------------------------------------------------

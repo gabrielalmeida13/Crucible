@@ -32,7 +32,7 @@ def apply_filters(df: pd.DataFrame, thresholds: FilterThresholds) -> pd.DataFram
         ("fcf_consistency",      lambda d: filter_fcf_consistency(d, thresholds.fcf_positive_min_years)),
         ("leverage",             lambda d: filter_leverage(d, thresholds.net_debt_ebitda_max)),
         ("revenue_growth",       lambda d: filter_revenue_growth(d, thresholds.revenue_growth_positive_min_years)),
-        ("gross_margin_trend",   filter_gross_margin_stability),
+        ("gross_margin_trend",   lambda d: filter_gross_margin_stability(d, thresholds.gross_margin_min_slope)),
     ]
 
     result = usable
@@ -79,10 +79,12 @@ def filter_revenue_growth(
     return df[mask]
 
 
-def filter_gross_margin_stability(df: pd.DataFrame) -> pd.DataFrame:
-    """Keep tickers with a stable or growing gross margin (trend slope ≥ 0)."""
+def filter_gross_margin_stability(
+    df: pd.DataFrame, min_slope: float = -0.005
+) -> pd.DataFrame:
+    """Keep tickers with gross margin trend slope ≥ min_slope."""
     mask = (
         df["gross_margin_trend_slope"].notna()
-        & (df["gross_margin_trend_slope"] >= 0)
+        & (df["gross_margin_trend_slope"] >= min_slope)
     )
     return df[mask]
