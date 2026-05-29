@@ -23,6 +23,13 @@ PORTFOLIO_CSV = PROJECT_ROOT / "data" / "portfolio.csv"
 PICKS_DB      = PROJECT_ROOT / "data" / "crucible_picks.db"
 
 # Crucible package imports (available after sys.path insert above)
+from crucible.options import (
+    IV_RANK_WARN,
+    IVRankResult,
+    OptionsAdvice,
+    check_iv_rank,
+    suggest_options_strategy,
+)
 from crucible.portfolio import allocation_advice
 from crucible.regime import (
     Regime,
@@ -1272,10 +1279,292 @@ def _tab_performance() -> None:
 # Main
 # ===========================================================================
 
+# ===========================================================================
+# Tab 6 — Options
+# ===========================================================================
+
+_ACTION_LABELS = {
+    "new_position":    "New position — long call (leverage vs buying shares)",
+    "protect_gains":   "Protect gains — protective put (hedge existing position)",
+    "hedge_portfolio": "Hedge portfolio — index put (SPY/QQQ directional hedge)",
+}
+
+_IV_BADGE = {
+    True:  ("#721c24", "#f8d7da", "🔴 HIGH IV"),
+    False: ("#155724", "#d4edda", "🟢 Normal IV"),
+}
+
+
+@st.cache_data(ttl=1800)
+def _fetch_options_advice(
+    ticker: str,
+    action: str,
+    current_price: float,
+    budget_eur: float,
+    expiry_days: int,
+) -> OptionsAdvice | str:
+    """Cached wrapper around suggest_options_strategy. Returns OptionsAdvice or error str."""
+    try:
+        return suggest_options_strategy(ticker, action, current_price, budget_eur, expiry_days)
+    except Exception as exc:
+        return str(exc)
+
+
+@st.cache_data(ttl=1800)
+def _fetch_current_price_single(ticker: str) -> float | None:
+    """Fetch latest price for a single ticker."""
+    try:
+        p = float(yf.Ticker(ticker).fast_info.last_price)
+        return p if p > 0 else None
+    except Exception:
+        return None
+
+
+def _render_iv_badge(iv: IVRankResult) -> None:
+    """Render IV rank as a coloured badge plus metric columns."""
+    text_color, bg, label = _IV_BADGE[iv.warning]
+    rank_str = f"{iv.iv_rank:.0f}th pct" if not np.isnan(iv.iv_rank) else "—"
+    st.markdown(
+        f'<span style="display:inline-block;padding:4px 12px;border-radius:5px;'
+        f'background:{bg};color:{text_color};font-weight:700;">'
+        f"{label} — IV rank {rank_str}</span>",
+        unsafe_allow_html=True,
+    )
+    c1, c2, c3 = st.columns(3)
+    c1.metric(
+        "Current IV (ATM option)",
+        f"{iv.current_iv:.0%}" if not np.isnan(iv.current_iv) else "—",
+        help="Implied volatility from nearest ATM option",
+    )
+    c2.metric(
+        "30d realised vol",
+        f"{iv.hv_30d:.0%}" if not np.isnan(iv.hv_30d) else "—",
+        help="Annualised 30-day historical volatility",
+    )
+    c3.metric(
+        "IV rank (approx)",
+        f"{iv.iv_rank:.0f}th percentile" if not np.isnan(iv.iv_rank) else "—",
+        help=iv.note,
+    )
+
+
+def _render_advice(advice: OptionsAdvice) -> None:
+    """Render the full OptionsAdvice result."""
+    # IV context
+    st.markdown("#### Implied Volatility Context")
+    _render_iv_badge(advice.iv_rank_result)
+
+    if advice.warning:
+        st.warning(advice.warning)
+    if advice.liquidity_warning:
+        st.warning(f"⚠ Liquidity: {advice.liquidity_warning}")
+
+    st.divider()
+
+    # Contract summary
+    st.markdown("#### Contract Details")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Expiry", f"{advice.expiry_date} ({advice.days_to_expiry}d)")
+    c2.metric(
+        f"Strike (nearest {'call' if advice.option_type == 'call' else 'put'})",
+        f"${advice.strike:,.0f}",
+    )
+    c3.metric(
+        "Premium (mid)",
+        f"${advice.premium_usd:.2f} / €{advice.premium_eur:.2f}",
+        help=f"Bid ${advice.bid_usd:.2f} / Ask ${advice.ask_usd:.2f}",
+    )
+    c4.metric(
+        "1 contract cost",
+        f"€{advice.cost_per_contract_eur:,.0f}",
+        help="100 shares × premium in EUR",
+    )
+
+    c1b, c2b, c3b, c4b = st.columns(4)
+    c1b.metric("Contracts affordable", advice.contracts_affordable)
+    c2b.metric("Total cost", f"€{advice.cost_total_eur:,.0f}")
+    c3b.metric("Breakeven at expiry", f"${advice.breakeven_usd:.2f}")
+    c4b.metric(
+        "Max loss",
+        f"€{advice.max_loss_eur:,.0f}",
+        help="Full premium if option expires worthless",
+    )
+
+    st.divider()
+
+    # Recommendation
+    st.markdown("#### Recommendation")
+    st.markdown(f"**{advice.recommendation}**")
+    for bullet in advice.rationale:
+        st.markdown(f"- {bullet}")
+
+    # Payoff table
+    if advice.payoff_table:
+        st.divider()
+        st.markdown(
+            "#### Payoff at Expiry — Option vs Equivalent Shares Investment\n"
+            f"*Option: {advice.contracts_affordable} contract(s) × 100 shares × "
+            f"€{advice.premium_eur:.2f}/share = €{advice.cost_total_eur:,.0f} total. "
+            f"Shares: same €{advice.cost_total_eur:,.0f} invested at current price.*"
+        )
+
+        rows = []
+        for r in advice.payoff_table:
+            rows.append({
+                "Move":            r.move_label,
+                "Stock price ($)": f"${r.stock_price_usd:.2f}",
+                "Option P&L (€)":  r.option_pnl_eur,
+                "Option ret %":    r.option_return_pct,
+                "Shares P&L (€)":  r.shares_pnl_eur,
+                "Shares ret %":    r.shares_return_pct,
+            })
+        df = pd.DataFrame(rows)
+
+        def _color_pnl(val: float) -> str:
+            if not isinstance(val, (int, float)) or np.isnan(val):
+                return ""
+            return "color: #28a745; font-weight:600" if val >= 0 else "color: #dc3545; font-weight:600"
+
+        styled = (
+            df.style
+            .map(_color_pnl, subset=["Option P&L (€)", "Option ret %",
+                                     "Shares P&L (€)", "Shares ret %"])
+            .format({
+                "Option P&L (€)": "{:+,.0f}",
+                "Option ret %":   "{:+.1f}%",
+                "Shares P&L (€)": "{:+,.0f}",
+                "Shares ret %":   "{:+.1f}%",
+            }, na_rep="—")
+        )
+        st.dataframe(styled, hide_index=True, width="stretch")
+
+        st.caption(
+            "Payoff assumes option held to expiry (intrinsic value only). "
+            "American-style options may be exercised early. "
+            "Actual mid-market premium may differ from execution price."
+        )
+
+
+def _tab_options() -> None:
+    st.subheader("Options Strategy Analysis")
+    st.caption(
+        "XTB Portugal offers buy-only American-style options on ~110 US stocks. "
+        "Max expiry ~231 days. Standard contracts of 100 shares. "
+        "Use this tool to evaluate call/put strategies before committing capital."
+    )
+
+    # ── Ticker selection ─────────────────────────────────────────────────────
+    months = _available_months()
+    shortlist_tickers: list[str] = []
+    if months:
+        for track in (1, 2, 3):
+            sl, _ = _load_track_picks(months[0], track)
+            shortlist_tickers.extend(sl.index.tolist())
+    shortlist_tickers = list(dict.fromkeys(shortlist_tickers))  # dedup, preserve order
+
+    portfolio_tickers = _load_portfolio_csv()["ticker"].tolist()
+
+    col_src, col_tkr = st.columns([2, 3])
+    ticker_source = col_src.radio(
+        "Ticker source",
+        ["Portfolio", "Current shortlist", "Manual"],
+        horizontal=True,
+        key="opt_ticker_source",
+    )
+
+    if ticker_source == "Portfolio" and portfolio_tickers:
+        ticker = col_tkr.selectbox("Select position", portfolio_tickers, key="opt_tkr_portfolio")
+    elif ticker_source == "Current shortlist" and shortlist_tickers:
+        ticker = col_tkr.selectbox("Select from shortlist", shortlist_tickers, key="opt_tkr_shortlist")
+    else:
+        ticker = col_tkr.text_input(
+            "Enter ticker (e.g. APH, SPY, QQQ)",
+            value="APH",
+            key="opt_tkr_manual",
+        ).upper().strip()
+
+    if not ticker:
+        st.warning("Enter a ticker to continue.")
+        return
+
+    # ── Strategy inputs ───────────────────────────────────────────────────────
+    st.markdown("---")
+    ic1, ic2, ic3, ic4 = st.columns(4)
+
+    action_key = ic1.selectbox(
+        "Action",
+        list(_ACTION_LABELS.keys()),
+        format_func=lambda k: _ACTION_LABELS[k],
+        key="opt_action",
+    )
+    budget_eur = ic2.number_input(
+        "Budget (€)",
+        min_value=50.0,
+        max_value=50000.0,
+        value=500.0,
+        step=50.0,
+        format="%.0f",
+        key="opt_budget",
+    )
+    expiry_days = ic3.number_input(
+        "Target expiry (days)",
+        min_value=7,
+        max_value=231,
+        value=180,
+        step=30,
+        key="opt_expiry",
+    )
+
+    # Current price — fetch or override
+    fetched_price = _fetch_current_price_single(ticker)
+    price_default = fetched_price if fetched_price else 100.0
+    current_price = ic4.number_input(
+        "Current price ($)",
+        min_value=1.0,
+        value=round(price_default, 2),
+        step=0.5,
+        format="%.2f",
+        key="opt_price",
+        help="Auto-fetched from yfinance; override if needed.",
+    )
+    if fetched_price:
+        ic4.caption(f"Live: ${fetched_price:.2f}")
+
+    # ── Run analysis ─────────────────────────────────────────────────────────
+    if not st.button("Analyse", type="primary", key="opt_run"):
+        st.info(
+            "Select ticker and strategy above, then click **Analyse**. "
+            "Fetches live option chain data (~5–10 s)."
+        )
+        return
+
+    with st.spinner(f"Fetching {ticker} option chain and IV data…"):
+        result = _fetch_options_advice(
+            ticker, action_key, float(current_price),
+            float(budget_eur), int(expiry_days),
+        )
+
+    if isinstance(result, str):
+        st.error(f"Could not retrieve option data: {result}")
+        st.caption(
+            "Possible causes: ticker not listed on US options markets, "
+            "no options within 231 days, or network error. "
+            "Try SPY or QQQ for index options."
+        )
+        return
+
+    _render_advice(result)
+
+
+# ===========================================================================
+# Main
+# ===========================================================================
+
+
 def main() -> None:
     st.title("⚗️ Crucible — Monthly Stock Screener")
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["Monthly Picks", "Portfolio", "Manual Import", "History", "Performance"]
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+        ["Monthly Picks", "Portfolio", "Manual Import", "History", "Performance", "Options"]
     )
     with tab1:
         _tab_monthly_picks()
@@ -1287,6 +1576,8 @@ def main() -> None:
         _tab_history()
     with tab5:
         _tab_performance()
+    with tab6:
+        _tab_options()
 
 
 if __name__ == "__main__":

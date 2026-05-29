@@ -145,15 +145,16 @@ Viable uses with current capital:
    and can be used to hedge the overall portfolio direction.
 
 **Implementation:**
-- [ ] Create `crucible/options.py` with `suggest_options_strategy(ticker, position,
-      budget, prices, expiry_days=231)` — given a ticker and context (new pick,
-      existing winner, protective hedge), outputs: recommended strategy, estimated
-      premium, breakeven price, max loss, payoff diagram data
-- [ ] Use `yf.Ticker(ticker).option_chain(date)` for real option chain data
-- [ ] Add Options tab to dashboard: given a ticker from the shortlist or portfolio,
-      shows available strikes/expiries with payoff comparison (buy shares vs buy call)
-- [ ] Integrate with portfolio module: for positions with return > 100% and
-      market_value > €500, flag "consider protective put" in allocation advice
+- [x] `crucible/options.py` — `suggest_options_strategy(ticker, action, current_price,
+      budget_eur, expiry_days=180)` and `check_iv_rank(ticker, lookback_days=252)`;
+      real option chain via `yf.Ticker(ticker).option_chain(date)`; outputs:
+      strike, premium in EUR, contracts affordable, breakeven, max loss, payoff table
+      at ±10%/±25%/±50%; IV rank badge; liquidity spread warning
+- [x] Options tab in dashboard: ticker from portfolio/shortlist/manual; action
+      selector; budget + expiry inputs; live option chain fetch; IV badge +
+      payoff comparison table (option vs equivalent shares investment)
+- [ ] Integrate with portfolio module: flag "consider protective put" in
+      allocation_advice for positions with return > 100% and market_value > €500
 
 **Learning path (before building the module):**
 - Understand delta, theta, implied volatility — these determine option pricing
