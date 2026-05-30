@@ -321,6 +321,12 @@ def main() -> None:
                         help="Number of candidates to display (default 10)")
     parser.add_argument("--budget", type=float, default=0.0,
                         help="Monthly investment budget for allocation advice (account currency)")
+    parser.add_argument(
+        "--month",
+        default=None,
+        metavar="YYYY-MM",
+        help="Override output directory month (e.g. 2026-06). Defaults to current month.",
+    )
     args = parser.parse_args()
 
     track  = int(args.track)
@@ -347,6 +353,7 @@ def main() -> None:
     today     = pd.Timestamp.now(tz="UTC").normalize()
     snap_key  = (today + pd.offsets.MonthEnd(0)).normalize()
     snap_date = pd.DatetimeIndex([snap_key])
+    output_month = args.month if args.month else today.strftime("%Y-%m")
 
     # 3. Prices: 15 months back so momentum_raw (12-1m) is computable
     price_end   = today.strftime("%Y-%m-%d")
@@ -417,7 +424,7 @@ def main() -> None:
         advice = allocation_advice(eval_df, budget, {}) if budget > 0 or not eval_df.empty else ""
         if not eval_df.empty or advice:
             _print_portfolio_review(eval_df, advice, today, regime)
-        output_dir = ROOT / "data" / "monthly" / today.strftime("%Y-%m")
+        output_dir = ROOT / "data" / "monthly" / output_month
         _write_manifest_atomic(output_dir, today, args.universe, track, 0)
         sys.exit(0)
 
@@ -432,7 +439,7 @@ def main() -> None:
     _print_portfolio_review(eval_df, full_advice, today, regime)
 
     # 11. New picks output
-    output_dir = ROOT / "data" / "monthly" / today.strftime("%Y-%m")
+    output_dir = ROOT / "data" / "monthly" / output_month
     _print_shortlist(result, track, top_n, today)
     _write_picks_md(result, track, top_n, output_dir, today, args.universe)
 

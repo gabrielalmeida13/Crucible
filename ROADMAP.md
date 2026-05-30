@@ -1,6 +1,6 @@
 # Crucible — ROADMAP.md
 
-> Current status: **Phase 4 complete — Phase 5 in progress (ML experimental + Options)**
+> Current status: **Phase 5 in progress — Track 2 v3 (quarterly EDGAR features) production-live June 2026**
 > Update the status line above every time the phase changes.
 
 ---
@@ -42,30 +42,47 @@ Everything built and operational:
 
 **Universe:** SP500 (503 tickers) for all three tracks.
 **Holding period:** 1 month.
-**Primary engine:** Track 2 (Growth Inflection) — beats benchmark in held-out.
+**Primary engine:** Track 2 v3 (Growth Inflection, quarterly EDGAR features) — beats benchmark
+and v2 baseline in both backtest and held-out. Production-live from June 2026.
 **Rotation protocol:** Protocol B (50% T2 / 30% T3 / 20% T1) beats Track 2 alone
 on Sharpe and drawdown but sacrifices 11% return in current regime.
 Given high risk tolerance: Track 2 pure for monthly picks.
+
+### Track 2 v3 validation — quarterly EDGAR features (approved 2026-05-30)
+
+Features added: `revenue_growth_q1yoy` (quarterly YoY > 6%, replaces annual filter),
+`revenue_accel_quarterly` (QoQ acceleration, weight 10% in growth_quality sub-score).
+Snapshots rebuilt from EDGAR 10-Q filings. Caches at `data/cache/snapshots_SP500_*.pkl`
+are v3-tagged (built 2026-05-30). **Do not delete these without rebuilding.**
+
+| Window | Total return | Excess vs SP500 | Sharpe | Hit rate | vs v2 |
+|--------|-------------|-----------------|--------|----------|-------|
+| Backtest 2013–2024 | 477.40% | +218.25% | 0.88 | 70.03% | +70.26% / +0.17 Sharpe |
+| Held-out 2025–2026 | 45.76% | +18.24% | 1.54 | 57.00% | +5.59% / +0.43 Sharpe |
 
 ### Backtest results (2013–2024, SP500)
 
 | Track | Total return | Excess vs SP500 | Sharpe | Hit rate |
 |-------|-------------|-----------------|--------|----------|
 | 1 — Quality | 361.03% | +101.88% | 0.79 | 70.36% |
-| 2 — Growth | 420.95% | +161.80% | 0.72 | 68.81% |
+| **2 — Growth v3** ★ | **477.40%** | **+218.25%** | **0.88** | **70.03%** |
 | 3 — Value | 298.94% | +39.80% | 0.61 | 73.48% |
 | Protocol B blend | 433.90% | +174.75% | 0.82 | — |
 | SP500 benchmark | 259.15% | — | — | — |
+
+★ Track 2 v3 = quarterly EDGAR features active (revenue_growth_q1yoy, revenue_accel_quarterly).
 
 ### Held-out results (2025-01 to 2026-05, SP500)
 
 | Track | Total return | Excess | Sharpe | Hit rate | Max DD |
 |-------|-------------|--------|--------|----------|--------|
 | 1 — Quality | 8.48% | -17.22% | 0.25 | 59.00% | -7.43% |
-| 2 — Growth | 40.17% | +14.48% | 1.11 | 50.82% | -6.79% |
+| **2 — Growth v3** ★ | **45.76%** | **+18.24%** | **1.54** | **57.00%** | **-6.14%** |
 | 3 — Value | 19.44% | -6.25% | 0.80 | 67.06% | -7.72% |
 | Protocol B | 28.94% | +2.70% | 1.16 | 57.65% | -4.64% |
-| SP500 benchmark | 25.69% | — | — | — | — |
+| SP500 benchmark | 27.52% | — | — | — | — |
+
+★ Track 2 v3 is the production baseline from June 2026.
 
 ### Real portfolio (from May 2026)
 
@@ -80,12 +97,16 @@ Given high risk tolerance: Track 2 pure for monthly picks.
 ## Prospective validation protocol (MANDATORY — June 2026 onwards)
 
 **System frozen as of June 2026. No production parameter changes permitted.**
+**Production baseline: Track 2 v3 (quarterly EDGAR features, validated 2026-05-30).**
 
-- Monthly run on 1st of each month — `run_monthly.py --track 2 --budget 100`
+- Monthly run on 1st of each month — `run_monthly.py --track 2 --budget 100 --month YYYY-MM`
+- First prospective run: June 2026 — `run_monthly.py --track 2 --budget 100 --month 2026-06`
+- Output: `data/monthly/YYYY-MM/track2_picks.md` + `run_manifest.json`
 - All picks logged to SQLite — never overwritten
 - Results reviewed May 2027 vs actual prices
 - Bug fixes: document, fix, rerun without looking at results first
-- Any production parameter change restarts the prospective clock
+- Any production parameter change (including scorer weights, filter thresholds, feature set)
+  restarts the prospective clock and requires a new held-out validation
 
 The ML experimental branch and options module are SEPARATE from the
 production system — they do not affect prospective logging or validation.
@@ -93,6 +114,20 @@ production system — they do not affect prospective logging or validation.
 ---
 
 ## Phase 5 — Parallel workstreams (active now)
+
+### 5.Q — Quarterly EDGAR features for Track 2 ✓ complete (2026-05-30)
+
+- [x] `load_raw_quarterly_facts()` — reads 10-Q filings from local EDGAR companyfacts.zip
+- [x] `_get_quarterly_series()` — derives standalone quarterly values (Y₁ − Y₀ subtraction),
+      latest amendment wins per fiscal end date
+- [x] `revenue_growth_q1yoy` — most recent quarter vs same quarter 1 year prior; range-clipped
+      to [−100%, +500%]; filter threshold 6% (fallback to 8% annual when absent)
+- [x] `revenue_accel_quarterly` — QoQ sequential acceleration (Q₀ vs Q₋₁ growth rate delta);
+      added to growth_quality sub-score at 10% weight
+- [x] `gross_margin_q_latest`, `fcf_q_last2` — quarterly gross margin and trailing 2Q FCF
+- [x] Snapshot rebuild: old SP500 caches deleted, rebuilt 2026-05-30 with v3 features
+- [x] Validation: backtest +70.26% vs v2, held-out +5.59%, Sharpe +0.43 — approved for production
+- [x] `run_backtest_track2_v3.py` — full validation script; reports in `data/results/`
 
 ### 5.0 — ML experimental: LightGBM LambdaMART (start now, validate December)
 
@@ -207,7 +242,7 @@ Options at Phase 5 mid-point (November 2026):
 
 ```
 Day 1 of each month:
-1. python scripts/run_monthly.py --track 2 --budget 100
+1. python scripts/run_monthly.py --track 2 --budget 100 --month YYYY-MM
 2. Open dashboard → analyse shortlist
 3. Export track2_picks.md → debate top 3 with AI assistant
 4. Execute purchase on XTB
